@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <TargetFramework>net5.0</TargetFramework>
-	  <Version>0.0.2.0-alpha</Version>
+	  <Version>0.1.0.0-beta</Version>
     <Authors>Alexey Yakubin</Authors>
     <Company>Delobytes</Company>
     <Copyright>Авторские права © Делобайты 2021. Все права защищены</Copyright>

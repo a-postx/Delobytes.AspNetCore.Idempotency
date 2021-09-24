@@ -36,6 +36,6 @@ namespace Delobytes.AspNetCore.Idempotency
         /// </para>
         /// <para>Default: Newtonsoft</para>
         /// </summary>
-        public string BodyOutputFormatterType { get; set; } = "Newtonsoft";
+        public OutputFormatterType BodyOutputFormatterType { get; set; } = OutputFormatterType.Newtonsoft;
     }
 }

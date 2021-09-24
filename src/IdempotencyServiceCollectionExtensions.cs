@@ -23,11 +23,6 @@ namespace Delobytes.AspNetCore.Idempotency
                 throw new ArgumentNullException(nameof(services));
             }
 
-            ////if (configure is null)
-            ////{
-            ////    throw new ArgumentNullException(nameof(configure));
-            ////}
-
             if (!services.Any(x => x.ServiceType == typeof(IDistributedCache)))
             {
                 throw new InvalidOperationException("An IDistributedCache provider must be registered for idempotency control.");

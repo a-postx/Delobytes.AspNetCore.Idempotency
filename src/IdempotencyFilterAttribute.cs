@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -40,11 +39,6 @@ namespace Delobytes.AspNetCore.Idempotency
             _distributedCache = distributedCache ?? throw new ArgumentNullException(nameof(distributedCache));
             _mvcOptions = mvcOptions.Value;
 
-            if (!string.IsNullOrEmpty(_options.CacheKeysPrefix))
-            {
-                KeyPrefix = _options.CacheKeysPrefix;
-            }
-
             SerializerOptions = new JsonSerializerOptions
             {
                 DictionaryKeyPolicy = JsonNamingPolicy.CamelCase,
@@ -60,7 +54,6 @@ namespace Delobytes.AspNetCore.Idempotency
         private readonly IDistributedCache _distributedCache;
         private readonly MvcOptions _mvcOptions;
 
-        private string KeyPrefix { get; set; } = "idempotency_keys";
         private JsonSerializerOptions SerializerOptions { get; set; }
 
         /// <summary>
@@ -74,14 +67,14 @@ namespace Delobytes.AspNetCore.Idempotency
             if (_options.Enabled)
             {
                 string idempotencyKey = GetIdempotencyKeyHeaderValue(context.HttpContext);
-
+                
                 if (string.IsNullOrEmpty(idempotencyKey))
                 {
                     context.Result = new BadRequestObjectResult($"Запрос не содержит заголовка {_options.IdempotencyHeader} или значение в нём неверно.");
                     return;
                 }
 
-                string key = $"{KeyPrefix}:{idempotencyKey}";
+                string key = $"{_options.CacheKeysPrefix}:{idempotencyKey}";
 
                 string method = context.HttpContext.Request.Method;
                 string path = context.HttpContext.Request.Path.HasValue ? context.HttpContext.Request.Path.Value : null;
@@ -228,7 +221,7 @@ namespace Delobytes.AspNetCore.Idempotency
 
         private async Task<(bool created, ApiRequest request)> GetOrCreateRequestAsync(string idempotencyKey, string method, string path, string query)
         {
-            string key = $"{KeyPrefix}:{idempotencyKey}";
+            string key = $"{_options.CacheKeysPrefix}:{idempotencyKey}";
 
             string cachedApiRequest;
 
@@ -334,7 +327,7 @@ namespace Delobytes.AspNetCore.Idempotency
             request.Body = body;
         }
 
-        private OutputFormatter GetOutputFormatter(string mediaType, string formatterType)
+        private OutputFormatter GetOutputFormatter(string mediaType, OutputFormatterType formatterType)
         {
             if (_mvcOptions.OutputFormatters.Count == 0)
             {
@@ -362,34 +355,39 @@ namespace Delobytes.AspNetCore.Idempotency
             return (properFormatter is not null) ? properFormatter : CreateJsonFormatter(mediaType, formatterType);
         }
 
-        private static OutputFormatter CreateJsonFormatter(string mediaType, string formatterType)
+        private static OutputFormatter CreateJsonFormatter(string mediaType, OutputFormatterType formatterType)
         {
-            if (formatterType == "Newtonsoft")
+            OutputFormatter result = null;
+
+            switch (formatterType)
             {
-                NewtonsoftJsonOutputFormatter formatter = GetNewtonsoftJsonOutputFormatter();
+                case OutputFormatterType.Newtonsoft:
+                    NewtonsoftJsonOutputFormatter newtonsoftFormatter = GetNewtonsoftJsonOutputFormatter();
 
-                if (!formatter.SupportedMediaTypes.Any(e => e == mediaType))
-                {
-                    formatter.SupportedMediaTypes.Insert(0, mediaType);
-                }
+                    if (!newtonsoftFormatter.SupportedMediaTypes.Any(e => e == mediaType))
+                    {
+                        newtonsoftFormatter.SupportedMediaTypes.Insert(0, mediaType);
+                    }
 
-                return formatter;
+                    result = newtonsoftFormatter;
+                    break;
+
+                case OutputFormatterType.SystemText:
+                    SystemTextJsonOutputFormatter systemtextFormatter = GetSystemTextJsonOutputFormatter();
+
+                    if (!systemtextFormatter.SupportedMediaTypes.Any(e => e == mediaType))
+                    {
+                        systemtextFormatter.SupportedMediaTypes.Insert(0, mediaType);
+                    }
+
+                    result = systemtextFormatter;
+                    break;
+
+                default:
+                    throw new NotImplementedException($"Body output formatter for type '{formatterType}' is not implemented.");
             }
-            else if (formatterType == "SystemText")
-            {
-                SystemTextJsonOutputFormatter formatter = GetSystemTextJsonOutputFormatter();
 
-                if (!formatter.SupportedMediaTypes.Any(e => e == mediaType))
-                {
-                    formatter.SupportedMediaTypes.Insert(0, mediaType);
-                }
-
-                return formatter;
-            }
-            else
-            {
-                throw new NotImplementedException($"Body output formatter for type '{formatterType}' is not implemented.");
-            }
+            return result;
         }
 
         private static SystemTextJsonOutputFormatter GetSystemTextJsonOutputFormatter()

@@ -9,6 +9,66 @@
             Модель веб-запроса и результата.
             </summary>
         </member>
+        <member name="M:Delobytes.AspNetCore.Idempotency.ApiRequest.#ctor">
+            <summary>
+            Конструктор.
+            </summary>
+        </member>
+        <member name="P:Delobytes.AspNetCore.Idempotency.ApiRequest.ApiRequestID">
+            <summary>
+            Уникальный идентификатор запроса, определяемый ключом идемпотентности.
+            </summary>
+        </member>
+        <member name="P:Delobytes.AspNetCore.Idempotency.ApiRequest.Method">
+            <summary>
+            Метод запроса.
+            </summary>
+        </member>
+        <member name="P:Delobytes.AspNetCore.Idempotency.ApiRequest.Path">
+            <summary>
+            Путь запроса.
+            </summary>
+        </member>
+        <member name="P:Delobytes.AspNetCore.Idempotency.ApiRequest.Query">
+            <summary>
+            Параметры запроса.
+            </summary>
+        </member>
+        <member name="P:Delobytes.AspNetCore.Idempotency.ApiRequest.StatusCode">
+            <summary>
+            Код ответа.
+            </summary>
+        </member>
+        <member name="P:Delobytes.AspNetCore.Idempotency.ApiRequest.Headers">
+            <summary>
+            Заголовки ответа.
+            </summary>
+        </member>
+        <member name="P:Delobytes.AspNetCore.Idempotency.ApiRequest.BodyType">
+            <summary>
+            Тип объекта, который сериализован в тело ответа.
+            </summary>
+        </member>
+        <member name="P:Delobytes.AspNetCore.Idempotency.ApiRequest.Body">
+            <summary>
+            Тело ответа.
+            </summary>
+        </member>
+        <member name="P:Delobytes.AspNetCore.Idempotency.ApiRequest.ResultType">
+            <summary>
+            Тип результата запроса (IActionResult).
+            </summary>
+        </member>
+        <member name="P:Delobytes.AspNetCore.Idempotency.ApiRequest.ResultRouteName">
+            <summary>
+            Название маршрута, по которому сгенерирован URL в случае создания объекта (CreatedAtRouteResult).
+            </summary>
+        </member>
+        <member name="P:Delobytes.AspNetCore.Idempotency.ApiRequest.ResultRouteValues">
+            <summary>
+            Данные, с помощью которых построен результирующий маршрут (CreatedAtRouteResult).
+            </summary>
+        </member>
         <member name="T:Delobytes.AspNetCore.Idempotency.IdempotencyControlOptions">
             <summary>
             Настройки контроля идемпотентности.
@@ -42,9 +102,28 @@
             <summary>
             <para>
             Форматировщик вывода тела запроса при возвращении запроса из кеша.
-            Возможные значения: Newtonsoft, SystemText.
             </para>
-            <para>Default: Newtonsoft</para>
+            <para>Default: <see cref="F:Delobytes.AspNetCore.Idempotency.OutputFormatterType.Newtonsoft"/></para>
+            </summary>
+        </member>
+        <member name="T:Delobytes.AspNetCore.Idempotency.IdempotencyException">
+            <summary>
+            Исключение идемпотентности.
+            </summary>
+        </member>
+        <member name="M:Delobytes.AspNetCore.Idempotency.IdempotencyException.#ctor">
+            <summary>
+            Конструктор.
+            </summary>
+        </member>
+        <member name="M:Delobytes.AspNetCore.Idempotency.IdempotencyException.#ctor(System.String)">
+            <summary>
+            Конструктор.
+            </summary>
+        </member>
+        <member name="M:Delobytes.AspNetCore.Idempotency.IdempotencyException.#ctor(System.String,System.Exception)">
+            <summary>
+            Конструктор.
             </summary>
         </member>
         <member name="T:Delobytes.AspNetCore.Idempotency.IdempotencyFilterAttribute">
@@ -79,6 +158,21 @@
             <param name="services"><see cref="T:Microsoft.Extensions.DependencyInjection.IServiceCollection"/> в которую нужно добавить контроль идемпотентности.</param>
             <param name="configure"><see cref="T:System.Action`1"/> для настройки <see cref="T:Delobytes.AspNetCore.Idempotency.IdempotencyControlOptions"/>.</param>
             <returns>Ссылка на этот экземпляр после завершения операции.</returns>
+        </member>
+        <member name="T:Delobytes.AspNetCore.Idempotency.OutputFormatterType">
+            <summary>
+            Тип форматировщика ответа для выдачи тела ответа из кеша.
+            </summary>
+        </member>
+        <member name="F:Delobytes.AspNetCore.Idempotency.OutputFormatterType.Newtonsoft">
+            <summary>
+            <see cref="N:Newtonsoft.Json"/>
+            </summary>
+        </member>
+        <member name="F:Delobytes.AspNetCore.Idempotency.OutputFormatterType.SystemText">
+            <summary>
+            <see cref="N:System.Text"/>
+            </summary>
         </member>
     </members>
 </doc>

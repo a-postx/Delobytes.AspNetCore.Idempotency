@@ -32,9 +32,8 @@ namespace Delobytes.AspNetCore.Idempotency
         /// <summary>
         /// <para>
         /// Форматировщик вывода тела запроса при возвращении запроса из кеша.
-        /// Возможные значения: Newtonsoft, SystemText.
         /// </para>
-        /// <para>Default: Newtonsoft</para>
+        /// <para>Default: <see cref="OutputFormatterType.Newtonsoft"/></para>
         /// </summary>
         public OutputFormatterType BodyOutputFormatterType { get; set; } = OutputFormatterType.Newtonsoft;
     }

@@ -1,10 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text.Encodings.Web;
 using System.Text.Json;
-using System.Text.Json.Serialization;
-using System.Text.Unicode;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -19,8 +16,8 @@ using Microsoft.Extensions.Primitives;
 namespace Delobytes.AspNetCore.Idempotency
 {
     /// <summary>
-    /// Фильтр идемпотентности: не допускает запросов без ключа идемпотентности,
-    /// сохраняет запрос и результат в кеш, чтобы вернуть тот же ответ в случае запроса-дубликата.
+    /// Фильтр идемпотентности: сохраняет результаты запросов с ключом идемпотентности в кеш,
+    /// чтобы вернуть тот же ответ в случае запроса-дубликата.
     /// Реализация по примеру https://stripe.com/docs/api/idempotent_requests
     /// </summary>
     [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, AllowMultiple = false, Inherited = false)]
@@ -40,22 +37,12 @@ namespace Delobytes.AspNetCore.Idempotency
             _distributedCache = distributedCache ?? throw new ArgumentNullException(nameof(distributedCache));
             _mvcOptions = mvcOptions.Value;
             _serializerOptions = serializerOptions ?? throw new ArgumentNullException(nameof(serializerOptions));
-
-            //SerializerOptions = new JsonSerializerOptions
-            //{
-            //    DictionaryKeyPolicy = JsonNamingPolicy.CamelCase,
-            //    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-            //    Encoder = JavaScriptEncoder.Create(UnicodeRanges.All),
-            //    WriteIndented = false
-            //};
-            //SerializerOptions.Converters.Add(new JsonStringEnumConverter());
         }
 
         private readonly ILogger<IdempotencyFilterAttribute> _log;
         private readonly IdempotencyControlOptions _options;
         private readonly IDistributedCache _distributedCache;
         private readonly MvcOptions _mvcOptions;
-
         private readonly JsonSerializerOptions _serializerOptions;
 
         /// <summary>
@@ -100,7 +87,7 @@ namespace Delobytes.AspNetCore.Idempotency
 
                     ResourceExecutedContext executedContext = await next.Invoke();
 
-                    await UpdateRequestDataAsync(executedContext, request, key);
+                    await UpdateRequestWithResponseDataAsync(executedContext, request, key);
                 }
             }
             else
@@ -245,7 +232,7 @@ namespace Delobytes.AspNetCore.Idempotency
             _log.LogInformation("Cached response returned from IdempotencyFilter.");
         }
 
-        private async Task UpdateRequestDataAsync(ResourceExecutedContext executedContext, ApiRequest request, string cacheKey)
+        private async Task UpdateRequestWithResponseDataAsync(ResourceExecutedContext executedContext, ApiRequest request, string cacheKey)
         {
             request.StatusCode = executedContext.HttpContext.Response.StatusCode;
             request.Headers = executedContext
@@ -325,15 +312,10 @@ namespace Delobytes.AspNetCore.Idempotency
 
         private string GetIdempotencyKeyHeaderValue(HttpContext httpContext)
         {
-            if (httpContext.Request.Headers
-                .TryGetValue(_options.IdempotencyHeader, out StringValues idempotencyKeyValue))
-            {
-                return idempotencyKeyValue.ToString();
-            }
-            else
-            {
-                return string.Empty;
-            }
+            return httpContext.Request.Headers
+                .TryGetValue(_options.IdempotencyHeader, out StringValues idempotencyKeyValue)
+                ? idempotencyKeyValue.ToString()
+                : string.Empty;
         }
 
         private void SetBody(ApiRequest request, ObjectResult objectRequestResult)

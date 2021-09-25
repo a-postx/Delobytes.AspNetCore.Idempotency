@@ -32,21 +32,24 @@ namespace Delobytes.AspNetCore.Idempotency
                 throw new InvalidOperationException("An IDistributedCache provider must be registered for idempotency control.");
             }
 
+            if (!services.Any(x => x.ServiceType == typeof(JsonSerializerOptions)))
+            {
+                JsonSerializerOptions serializerOptions = new JsonSerializerOptions
+                {
+                    DictionaryKeyPolicy = JsonNamingPolicy.CamelCase,
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                    Encoder = JavaScriptEncoder.Create(UnicodeRanges.All),
+                    WriteIndented = false
+                };
+                serializerOptions.Converters.Add(new JsonStringEnumConverter());
+
+                services.AddSingleton(s => serializerOptions);
+            }
+
             if (configure is not null)
             {
                 services.Configure(configure);
             }
-
-            JsonSerializerOptions serializerOptions = new JsonSerializerOptions
-            {
-                DictionaryKeyPolicy = JsonNamingPolicy.CamelCase,
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-                Encoder = JavaScriptEncoder.Create(UnicodeRanges.All),
-                WriteIndented = false
-            };
-            serializerOptions.Converters.Add(new JsonStringEnumConverter());
-
-            services.AddSingleton(s => serializerOptions);
 
             services.AddScoped<IdempotencyFilterAttribute>();
 

@@ -13,7 +13,11 @@ public void ConfigureServices(IServiceCollection services)
     services.AddDistributedMemoryCache();
     services.AddIdempotencyControl(options =>
         {
+            options.Enabled = true;
+            options.HeaderRequired = true;
             options.IdempotencyHeader = "idempotencykey";
+            options.CacheKeysPrefix = "cached-idempotency-keys";
+            options.BodyOutputFormatterType = OutputFormatterType.Newtonsoft;
         });
 }
 ```

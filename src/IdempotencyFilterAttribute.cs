@@ -32,21 +32,23 @@ namespace Delobytes.AspNetCore.Idempotency
         public IdempotencyFilterAttribute(ILogger<IdempotencyFilterAttribute> logger,
             IOptions<IdempotencyControlOptions> options,
             IDistributedCache distributedCache,
-            IOptions<MvcOptions> mvcOptions)
+            IOptions<MvcOptions> mvcOptions,
+            JsonSerializerOptions serializerOptions)
         {
             _log = logger ?? throw new ArgumentNullException(nameof(logger));
             _options = options.Value;
             _distributedCache = distributedCache ?? throw new ArgumentNullException(nameof(distributedCache));
             _mvcOptions = mvcOptions.Value;
+            _serializerOptions = serializerOptions ?? throw new ArgumentNullException(nameof(serializerOptions));
 
-            SerializerOptions = new JsonSerializerOptions
-            {
-                DictionaryKeyPolicy = JsonNamingPolicy.CamelCase,
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-                Encoder = JavaScriptEncoder.Create(UnicodeRanges.All),
-                WriteIndented = false
-            };
-            SerializerOptions.Converters.Add(new JsonStringEnumConverter());
+            //SerializerOptions = new JsonSerializerOptions
+            //{
+            //    DictionaryKeyPolicy = JsonNamingPolicy.CamelCase,
+            //    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            //    Encoder = JavaScriptEncoder.Create(UnicodeRanges.All),
+            //    WriteIndented = false
+            //};
+            //SerializerOptions.Converters.Add(new JsonStringEnumConverter());
         }
 
         private readonly ILogger<IdempotencyFilterAttribute> _log;
@@ -54,7 +56,7 @@ namespace Delobytes.AspNetCore.Idempotency
         private readonly IDistributedCache _distributedCache;
         private readonly MvcOptions _mvcOptions;
 
-        private JsonSerializerOptions SerializerOptions { get; set; }
+        private readonly JsonSerializerOptions _serializerOptions;
 
         /// <summary>
         /// Проверяет идемпотентность и возвращает результат запроса из кеша если он уже был выполнен.
@@ -70,147 +72,35 @@ namespace Delobytes.AspNetCore.Idempotency
                 
                 if (string.IsNullOrEmpty(idempotencyKey))
                 {
-                    context.Result = new BadRequestObjectResult($"Запрос не содержит заголовка {_options.IdempotencyHeader} или значение в нём неверно.");
-                    return;
-                }
-
-                string key = $"{_options.CacheKeysPrefix}:{idempotencyKey}";
-
-                string method = context.HttpContext.Request.Method;
-                string path = context.HttpContext.Request.Path.HasValue ? context.HttpContext.Request.Path.Value : null;
-                string query = context.HttpContext.Request.QueryString.HasValue ? context.HttpContext.Request.QueryString.ToUriComponent() : null;
-
-                (bool requestCreated, ApiRequest request) = await GetOrCreateRequestAsync(idempotencyKey, method, path, query);
-
-                if (!requestCreated)
-                {
-                    if (request is null)
+                    if (_options.HeaderRequired)
                     {
-                        throw new IdempotencyException("Failed to create request.");
-                    }
-
-                    if (method != request.Method || path != request.Path || query != request.Query)
-                    {
-                        context.Result = new ConflictObjectResult("В кеше исполнения уже есть запрос с таким идентификатором и его параметры отличны от текущего запроса.");
+                        context.Result = new BadRequestObjectResult($"Запрос не содержит заголовка {_options.IdempotencyHeader} или значение в нём неверно.");
                         return;
-                    }
-
-                    context.HttpContext.Response.StatusCode = request.StatusCode ?? 0;
-
-                    string outputMediaType = string.Empty;
-
-                    foreach (KeyValuePair<string, List<string>> item in request.Headers)
-                    {
-                        string headerValue = string.Join(";", item.Value);
-
-                        context.HttpContext.Response.Headers[item.Key] = headerValue;
-
-                        if (string.Equals(item.Key, "Content-Type", StringComparison.OrdinalIgnoreCase))
-                        {
-                            outputMediaType = headerValue;
-                        }
-                    }
-
-                    Type contextResultType = Type.GetType(request.ResultType);
-
-                    if (contextResultType == typeof(CreatedAtRouteResult))
-                    {
-                        Type bodyType = Type.GetType(request.BodyType);
-                        object bodyObject = JsonSerializer.Deserialize(request.Body, bodyType, SerializerOptions);
-
-                        CreatedAtRouteResult result = new CreatedAtRouteResult(request.ResultRouteName, request.ResultRouteValues, bodyObject);
-                        result.DeclaredType = bodyType;
-                        result.StatusCode = request.StatusCode;
-
-                        OutputFormatter formatter = GetOutputFormatter(outputMediaType, _options.BodyOutputFormatterType);
-                        result.Formatters.Add(formatter);
-
-                        context.Result = result;
-                    }
-                    else if (contextResultType.BaseType == typeof(ObjectResult))
-                    {
-                        Type bodyType = Type.GetType(request.BodyType);
-                        object bodyObject = JsonSerializer.Deserialize(request.Body, bodyType, SerializerOptions);
-
-                        ObjectResult result = new ObjectResult(bodyObject)
-                        {
-                            StatusCode = request.StatusCode,
-                            DeclaredType = bodyType
-                        };
-
-                        OutputFormatter formatter = GetOutputFormatter(outputMediaType, _options.BodyOutputFormatterType);
-                        result.Formatters.Add(formatter);
-
-                        context.Result = result;
-                    }
-                    else if (contextResultType.BaseType == typeof(StatusCodeResult)
-                        || contextResultType.BaseType == typeof(ActionResult))
-                    {
-                        context.Result = new StatusCodeResult(request.StatusCode ?? 0);
                     }
                     else
                     {
-                        throw new IdempotencyException($"Idempotency is not implemented for IActionResult type {contextResultType}");
+                        await next.Invoke();
                     }
-
-                    _log.LogInformation("Cached response returned from IdempotencyFilter.");
-
-                    return;
                 }
-
-                ResourceExecutedContext executedContext = await next.Invoke();
-
-                int statusCode = context.HttpContext.Response.StatusCode;
-                request.StatusCode = statusCode;
-
-                Dictionary<string, List<string>> headers = context
-                    .HttpContext.Response.Headers.ToDictionary(h => h.Key, h => h.Value.ToList());
-                request.Headers = headers;
-
-                if (executedContext.Result != null)
+                else
                 {
-                    request.ResultType = executedContext.Result.GetType().AssemblyQualifiedName;
+                    string key = $"{_options.CacheKeysPrefix}:{idempotencyKey}";
 
-                    switch (executedContext.Result)
+                    string method = context.HttpContext.Request.Method;
+                    string path = context.HttpContext.Request.Path.HasValue ? context.HttpContext.Request.Path.Value : null;
+                    string query = context.HttpContext.Request.QueryString.HasValue ? context.HttpContext.Request.QueryString.ToUriComponent() : null;
+
+                    (bool requestCreated, ApiRequest request) = await GetOrCreateRequestAsync(idempotencyKey, method, path, query);
+
+                    if (!requestCreated)
                     {
-                        case CreatedAtRouteResult createdRequestResult:
-                        {
-                            SetBody(request, createdRequestResult);
-
-                            request.ResultRouteName = createdRequestResult.RouteName;
-
-                            Dictionary<string, string> routeValues = createdRequestResult
-                                .RouteValues.ToDictionary(r => r.Key, r => r.Value.ToString());
-                            request.ResultRouteValues = routeValues;
-
-                            break;
-                        }
-                        case ObjectResult objectRequestResult:
-                        {
-                            SetBody(request, objectRequestResult);
-
-                            break;
-                        }
-                        case NoContentResult noContentResult:
-                        case OkResult okResult:
-                        case StatusCodeResult statusCodeResult:
-                        case ActionResult actionResult:
-                        {
-                            // известные типы, которым не нужны дополнительные данные
-                            break;
-                        }
-                        default:
-                        {
-                            throw new IdempotencyException($"Idempotency is not implemented for result type {executedContext.GetType()}");
-                        }
+                        HandleRequestNotCreated(context, request, method, path, query);
+                        return;
                     }
-                }
 
-                bool requestUpdatedSuccessfully = await SetResponseInCacheAsync(key, request);
+                    ResourceExecutedContext executedContext = await next.Invoke();
 
-                if (!requestUpdatedSuccessfully)
-                {
-                    throw new IdempotencyException("Failed to set request response.");
+                    await UpdateRequestDataAsync(executedContext, request, key);
                 }
             }
             else
@@ -245,7 +135,7 @@ namespace Delobytes.AspNetCore.Idempotency
 
             if (cachedApiRequest is not null && cachedApiRequest.Length > 0)
             {
-                ApiRequest requestFromCache = JsonSerializer.Deserialize<ApiRequest>(cachedApiRequest, SerializerOptions);
+                ApiRequest requestFromCache = JsonSerializer.Deserialize<ApiRequest>(cachedApiRequest, _serializerOptions);
 
                 return (false, requestFromCache);
             }
@@ -257,7 +147,7 @@ namespace Delobytes.AspNetCore.Idempotency
                 apiRequest.Path = path;
                 apiRequest.Query = query;
 
-                string serializedRequest = JsonSerializer.Serialize(apiRequest, SerializerOptions);
+                string serializedRequest = JsonSerializer.Serialize(apiRequest, _serializerOptions);
 
                 DateTime startSetDt = DateTime.UtcNow;
 
@@ -281,9 +171,136 @@ namespace Delobytes.AspNetCore.Idempotency
             }
         }
 
+        private void HandleRequestNotCreated(ResourceExecutingContext context, ApiRequest request, string method, string path, string query)
+        {
+            if (request is null)
+            {
+                throw new IdempotencyException("Failed to create request.");
+            }
+
+            if (method != request.Method || path != request.Path || query != request.Query)
+            {
+                context.Result = new ConflictObjectResult("В кеше исполнения уже есть запрос с таким идентификатором и его параметры отличны от текущего запроса.");
+                return;
+            }
+
+            context.HttpContext.Response.StatusCode = request.StatusCode ?? 0;
+
+            string outputMediaType = string.Empty;
+
+            foreach (KeyValuePair<string, List<string>> item in request.Headers)
+            {
+                string headerValue = string.Join(";", item.Value);
+
+                context.HttpContext.Response.Headers[item.Key] = headerValue;
+
+                if (string.Equals(item.Key, "Content-Type", StringComparison.OrdinalIgnoreCase))
+                {
+                    outputMediaType = headerValue;
+                }
+            }
+
+            Type contextResultType = Type.GetType(request.ResultType);
+
+            if (contextResultType == typeof(CreatedAtRouteResult))
+            {
+                Type bodyType = Type.GetType(request.BodyType);
+                object bodyObject = JsonSerializer.Deserialize(request.Body, bodyType, _serializerOptions);
+
+                CreatedAtRouteResult result = new CreatedAtRouteResult(request.ResultRouteName, request.ResultRouteValues, bodyObject);
+                result.DeclaredType = bodyType;
+                result.StatusCode = request.StatusCode;
+
+                OutputFormatter formatter = GetOutputFormatter(outputMediaType, _options.BodyOutputFormatterType);
+                result.Formatters.Add(formatter);
+
+                context.Result = result;
+            }
+            else if (contextResultType.BaseType == typeof(ObjectResult))
+            {
+                Type bodyType = Type.GetType(request.BodyType);
+                object bodyObject = JsonSerializer.Deserialize(request.Body, bodyType, _serializerOptions);
+
+                ObjectResult result = new ObjectResult(bodyObject)
+                {
+                    StatusCode = request.StatusCode,
+                    DeclaredType = bodyType
+                };
+
+                OutputFormatter formatter = GetOutputFormatter(outputMediaType, _options.BodyOutputFormatterType);
+                result.Formatters.Add(formatter);
+
+                context.Result = result;
+            }
+            else if (contextResultType.BaseType == typeof(StatusCodeResult)
+                || contextResultType.BaseType == typeof(ActionResult))
+            {
+                context.Result = new StatusCodeResult(request.StatusCode ?? 0);
+            }
+            else
+            {
+                throw new IdempotencyException($"Idempotency is not implemented for IActionResult type {contextResultType}");
+            }
+
+            _log.LogInformation("Cached response returned from IdempotencyFilter.");
+        }
+
+        private async Task UpdateRequestDataAsync(ResourceExecutedContext executedContext, ApiRequest request, string cacheKey)
+        {
+            request.StatusCode = executedContext.HttpContext.Response.StatusCode;
+            request.Headers = executedContext
+                .HttpContext.Response.Headers.ToDictionary(h => h.Key, h => h.Value.ToList());
+
+            if (executedContext.Result != null)
+            {
+                request.ResultType = executedContext.Result.GetType().AssemblyQualifiedName;
+
+                switch (executedContext.Result)
+                {
+                    case CreatedAtRouteResult createdRequestResult:
+                    {
+                        SetBody(request, createdRequestResult);
+
+                        request.ResultRouteName = createdRequestResult.RouteName;
+
+                        Dictionary<string, string> routeValues = createdRequestResult
+                            .RouteValues.ToDictionary(r => r.Key, r => r.Value.ToString());
+                        request.ResultRouteValues = routeValues;
+
+                        break;
+                    }
+                    case ObjectResult objectRequestResult:
+                    {
+                        SetBody(request, objectRequestResult);
+
+                        break;
+                    }
+                    case NoContentResult noContentResult:
+                    case OkResult okResult:
+                    case StatusCodeResult statusCodeResult:
+                    case ActionResult actionResult:
+                    {
+                        // известные типы, которым не нужны дополнительные данные
+                        break;
+                    }
+                    default:
+                    {
+                        throw new IdempotencyException($"Idempotency is not implemented for result type {executedContext.GetType()}");
+                    }
+                }
+            }
+
+            bool requestUpdatedSuccessfully = await SetResponseInCacheAsync(cacheKey, request);
+
+            if (!requestUpdatedSuccessfully)
+            {
+                throw new IdempotencyException("Failed to set request response.");
+            }
+        }
+
         private async Task<bool> SetResponseInCacheAsync(string key, ApiRequest apiRequest)
         {
-            string serializedRequest = JsonSerializer.Serialize(apiRequest, SerializerOptions);
+            string serializedRequest = JsonSerializer.Serialize(apiRequest, _serializerOptions);
 
             DateTime startSetDt = DateTime.UtcNow;
 
@@ -323,7 +340,7 @@ namespace Delobytes.AspNetCore.Idempotency
         {
             string bodyType = objectRequestResult.Value.GetType().AssemblyQualifiedName;
             request.BodyType = bodyType;
-            byte[] body = JsonSerializer.SerializeToUtf8Bytes(objectRequestResult.Value, SerializerOptions);
+            byte[] body = JsonSerializer.SerializeToUtf8Bytes(objectRequestResult.Value, _serializerOptions);
             request.Body = body;
         }
 

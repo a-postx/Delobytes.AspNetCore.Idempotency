@@ -15,6 +15,15 @@ namespace Delobytes.AspNetCore.Idempotency
 
         /// <summary>
         /// <para>
+        /// Включает обязательность заголовка идемпотентности. Когда включено, на запросы без
+        /// соответствующего заголовка будет возвращаться код 400.
+        /// </para>
+        /// <para>Default: false</para>
+        /// </summary>
+        public bool HeaderRequired { get; set; } = false;
+
+        /// <summary>
+        /// <para>
         /// Заголовок идемпотентности, значение которого нужно обрабатывать.
         /// </para>
         /// <para>Default: Idempotency-Key</para>
@@ -31,7 +40,7 @@ namespace Delobytes.AspNetCore.Idempotency
 
         /// <summary>
         /// <para>
-        /// Форматировщик вывода тела запроса при возвращении запроса из кеша.
+        /// Тип используемого форматировщика вывода тела запроса при возвращении запроса из кеша.
         /// </para>
         /// <para>Default: <see cref="OutputFormatterType.Newtonsoft"/></para>
         /// </summary>

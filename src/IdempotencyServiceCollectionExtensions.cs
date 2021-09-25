@@ -1,5 +1,9 @@
 using System;
 using System.Linq;
+using System.Text.Encodings.Web;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Text.Unicode;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -32,6 +36,17 @@ namespace Delobytes.AspNetCore.Idempotency
             {
                 services.Configure(configure);
             }
+
+            JsonSerializerOptions serializerOptions = new JsonSerializerOptions
+            {
+                DictionaryKeyPolicy = JsonNamingPolicy.CamelCase,
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                Encoder = JavaScriptEncoder.Create(UnicodeRanges.All),
+                WriteIndented = false
+            };
+            serializerOptions.Converters.Add(new JsonStringEnumConverter());
+
+            services.AddSingleton(s => serializerOptions);
 
             services.AddScoped<IdempotencyFilterAttribute>();
 

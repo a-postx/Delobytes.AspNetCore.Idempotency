@@ -82,6 +82,15 @@
             <para>Default: Idempotency-Key</para>
             </summary>
         </member>
+        <member name="P:Delobytes.AspNetCore.Idempotency.IdempotencyControlOptions.HeaderRequired">
+            <summary>
+            <para>
+            Включает обязательность заголовка идемпотентности. Когда включено, на запросы без
+            соответствующего заголовка будет возвращаться код 400.
+            </para>
+            <para>Default: false</para>
+            </summary>
+        </member>
         <member name="P:Delobytes.AspNetCore.Idempotency.IdempotencyControlOptions.IdempotencyHeader">
             <summary>
             <para>
@@ -101,7 +110,7 @@
         <member name="P:Delobytes.AspNetCore.Idempotency.IdempotencyControlOptions.BodyOutputFormatterType">
             <summary>
             <para>
-            Форматировщик вывода тела запроса при возвращении запроса из кеша.
+            Тип используемого форматировщика вывода тела запроса при возвращении запроса из кеша.
             </para>
             <para>Default: <see cref="F:Delobytes.AspNetCore.Idempotency.OutputFormatterType.Newtonsoft"/></para>
             </summary>
@@ -133,7 +142,7 @@
             Реализация по примеру https://stripe.com/docs/api/idempotent_requests
             </summary>
         </member>
-        <member name="M:Delobytes.AspNetCore.Idempotency.IdempotencyFilterAttribute.#ctor(Microsoft.Extensions.Logging.ILogger{Delobytes.AspNetCore.Idempotency.IdempotencyFilterAttribute},Microsoft.Extensions.Options.IOptions{Delobytes.AspNetCore.Idempotency.IdempotencyControlOptions},Microsoft.Extensions.Caching.Distributed.IDistributedCache,Microsoft.Extensions.Options.IOptions{Microsoft.AspNetCore.Mvc.MvcOptions})">
+        <member name="M:Delobytes.AspNetCore.Idempotency.IdempotencyFilterAttribute.#ctor(Microsoft.Extensions.Logging.ILogger{Delobytes.AspNetCore.Idempotency.IdempotencyFilterAttribute},Microsoft.Extensions.Options.IOptions{Delobytes.AspNetCore.Idempotency.IdempotencyControlOptions},Microsoft.Extensions.Caching.Distributed.IDistributedCache,Microsoft.Extensions.Options.IOptions{Microsoft.AspNetCore.Mvc.MvcOptions},System.Text.Json.JsonSerializerOptions)">
             <summary>
             Конструктор.
             </summary>

@@ -1,5 +1,5 @@
 # Delobytes.AspNetCore.Idempotency
-Idempotency control resource filter for web-API apps on .Net 5. Filter will allow to keep data consistency for clients working with your API by returning a cached response for any request duplicate. You can choose any cache provider by registering IDistributedCache implementation (mamory cahce, Redis etc.).
+Idempotency control resource filter for web-API apps. Filter will allow to keep data consistency for clients working with your API by returning a cached response for any request duplicate. You can choose any cache provider by registering IDistributedCache implementation (mamory cahce, Redis etc.).
 
 [RU](README.md), [EN](README.en.md)
 

@@ -1,31 +1,30 @@
 using System;
 
-namespace Delobytes.AspNetCore.Idempotency
+namespace Delobytes.AspNetCore.Idempotency;
+
+/// <summary>
+/// Исключение идемпотентности.
+/// </summary>
+public class IdempotencyException : Exception
 {
     /// <summary>
-    /// Исключение идемпотентности.
+    /// Конструктор.
     /// </summary>
-    public class IdempotencyException : Exception
+    public IdempotencyException()
     {
-        /// <summary>
-        /// Конструктор.
-        /// </summary>
-        public IdempotencyException()
-        {
-        }
+    }
 
-        /// <summary>
-        /// Конструктор.
-        /// </summary>
-        public IdempotencyException(string message) : base(message)
-        {
-        }
+    /// <summary>
+    /// Конструктор.
+    /// </summary>
+    public IdempotencyException(string message) : base(message)
+    {
+    }
 
-        /// <summary>
-        /// Конструктор.
-        /// </summary>
-        public IdempotencyException(string message, Exception innerException) : base(message, innerException)
-        {
-        }
+    /// <summary>
+    /// Конструктор.
+    /// </summary>
+    public IdempotencyException(string message, Exception innerException) : base(message, innerException)
+    {
     }
 }

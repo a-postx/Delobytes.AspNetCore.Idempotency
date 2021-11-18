@@ -138,6 +138,8 @@ dotnet_diagnostic.CA1813.severity = suggestion
 dotnet_diagnostic.CA1019.severity = suggestion
 
 [*.{cs,csx,cake,vb,vbx}]
+# Undocumented
+csharp_style_namespace_declarations = file_scoped:warning
 # Private field underscore naming by default
 # https://stackoverflow.com/a/49428349/11001148
 dotnet_naming_rule.private_members_with_underscore.symbols  = private_fields

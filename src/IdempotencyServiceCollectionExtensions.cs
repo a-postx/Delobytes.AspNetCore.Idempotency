@@ -22,11 +22,7 @@ public static class IdempotencyServiceCollectionExtensions
     /// <returns>Ссылка на этот экземпляр после завершения операции.</returns>
     public static IServiceCollection AddIdempotencyControl(this IServiceCollection services, Action<IdempotencyControlOptions> configure = null)
     {
-
-        if (services is null)
-        {
-            throw new ArgumentNullException(nameof(services));
-        }
+        ArgumentNullException.ThrowIfNull(services);
 
         if (!services.Any(x => x.ServiceType == typeof(IDistributedCache)))
         {

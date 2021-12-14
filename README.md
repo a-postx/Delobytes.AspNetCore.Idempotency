@@ -1,6 +1,8 @@
 ﻿# Delobytes.AspNetCore.Idempotency
 Ресурсный фильтр контроля идемпотентности для веб-апи приложений. Использование фильтра позволит обеспечить целостность данных при работе с вашим АПИ - на случайные дубликаты запросов будут возвращены кешированные данные ответа. Вы можете исплользовать любого поставщика распределённого кеша, который реализует интерфейс IDistributedCache (кеш в памяти, Редис и т.д.).
 
+Реализация на базе документации Stripe https://stripe.com/docs/api/idempotent_requests
+
 [RU](README.md), [EN](README.en.md)
 
 ## Использование
@@ -30,7 +32,7 @@ public void ConfigureServices(IServiceCollection services)
 public class HomeController : ControllerBase
 {
     [HttpPost]
-    [ServiceFilter(typeof(IdempotencyFilterAttribute))] //<-- !
+    [ServiceFilter(typeof(IdempotencyFilterAttribute))]
     public Task<IActionResult> PostInfoAsync(
         [FromServices] IPostClientInfoAh handler,
         [FromBody] InfoSm infoSm,

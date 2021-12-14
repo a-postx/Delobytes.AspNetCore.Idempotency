@@ -34,7 +34,7 @@ public class IdempotencyControlOptions
     /// <para>
     /// Префикс, который будет добавляться ко всем ключам в распределённом кеше.
     /// </para>
-    /// <para>Default: Idempotency-Key</para>
+    /// <para>Default: idempotency_keys</para>
     /// </summary>
     public string CacheKeysPrefix { get; set; } = "idempotency_keys";
 

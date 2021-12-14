@@ -1,5 +1,7 @@
 # Delobytes.AspNetCore.Idempotency
-Idempotency control resource filter for web-API apps. Filter will allow to keep data consistency for clients working with your API by returning a cached response for any request duplicate. You can choose any cache provider by registering IDistributedCache implementation (mamory cahce, Redis etc.).
+Idempotency control resource filter for web-API apps. Filter will allow to keep data consistency for clients working with your API by returning a cached response for any request duplicate. You can choose any cache provider by registering IDistributedCache implementation (memory cache, Redis etc.).
+
+Implementation is based on Stripe docs https://stripe.com/docs/api/idempotent_requests
 
 [RU](README.md), [EN](README.en.md)
 
@@ -30,7 +32,7 @@ public void ConfigureServices(IServiceCollection services)
 public class HomeController : ControllerBase
 {
     [HttpPost]
-    [ServiceFilter(typeof(IdempotencyFilterAttribute))] //<-- !
+    [ServiceFilter(typeof(IdempotencyFilterAttribute))]
     public Task<IActionResult> PostInfoAsync(
         [FromServices] IPostClientInfoAh handler,
         [FromBody] InfoSm infoSm,

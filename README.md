@@ -26,7 +26,7 @@ public void ConfigureServices(IServiceCollection services)
 
 3. Поместите атрибут IdempotencyFilterAttribute к неидемпотентному методу или ко всему контроллеру:
 
-```
+```csharp
 [Route("[controller]")]
 [ApiController]
 public class HomeController : ControllerBase

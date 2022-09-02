@@ -9,7 +9,7 @@
             Модель веб-запроса и результата.
             </summary>
         </member>
-        <member name="M:Delobytes.AspNetCore.Idempotency.ApiRequest.#ctor">
+        <member name="M:Delobytes.AspNetCore.Idempotency.ApiRequest.#ctor(System.String,System.String)">
             <summary>
             Конструктор.
             </summary>
@@ -82,6 +82,16 @@
             <para>Default: Idempotency-Key</para>
             </summary>
         </member>
+        <member name="P:Delobytes.AspNetCore.Idempotency.IdempotencyControlOptions.Optional">
+            <summary>
+            <para>
+            Флаг, разрешающий благополучную отработку запроса если на уровне идемпотентности произошёл сбой.
+            Если контроль идемпотентности более важен, чем отказ в обслуживании (финансовое приложение),
+            то вы можете отключить этот флаг.
+            </para>
+            <para>Default: true</para>
+            </summary>
+        </member>
         <member name="P:Delobytes.AspNetCore.Idempotency.IdempotencyControlOptions.HeaderRequired">
             <summary>
             <para>
@@ -104,7 +114,7 @@
             <para>
             Префикс, который будет добавляться ко всем ключам в распределённом кеше.
             </para>
-            <para>Default: Idempotency-Key</para>
+            <para>Default: idempotency_keys</para>
             </summary>
         </member>
         <member name="P:Delobytes.AspNetCore.Idempotency.IdempotencyControlOptions.BodyOutputFormatterType">

@@ -20,7 +20,7 @@ public static class IdempotencyServiceCollectionExtensions
     /// <param name="services"><see cref="IServiceCollection"/> в которую нужно добавить контроль идемпотентности.</param>
     /// <param name="configure"><see cref="Action{IdempotencyControlOptions}"/> для настройки <see cref="IdempotencyControlOptions"/>.</param>
     /// <returns>Ссылка на этот экземпляр после завершения операции.</returns>
-    public static IServiceCollection AddIdempotencyControl(this IServiceCollection services, Action<IdempotencyControlOptions> configure = null)
+    public static IServiceCollection AddIdempotencyControl(this IServiceCollection services, Action<IdempotencyControlOptions>? configure = null)
     {
         ArgumentNullException.ThrowIfNull(services);
 

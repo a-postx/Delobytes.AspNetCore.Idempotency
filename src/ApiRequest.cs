@@ -12,7 +12,11 @@ public class ApiRequest
     /// <summary>
     /// Конструктор.
     /// </summary>
-    public ApiRequest() { }
+    public ApiRequest(string apiRequestId, string method)
+    {
+        ApiRequestID = apiRequestId;
+        Method = method;
+    }
 
     /// <summary>
     /// Уникальный идентификатор запроса, определяемый ключом идемпотентности.
@@ -25,11 +29,11 @@ public class ApiRequest
     /// <summary>
     /// Путь запроса.
     /// </summary>
-    public string Path { get; set; }
+    public string? Path { get; set; }
     /// <summary>
     /// Параметры запроса.
     /// </summary>
-    public string Query { get; set; }
+    public string? Query { get; set; }
     /// <summary>
     /// Код ответа.
     /// </summary>
@@ -37,25 +41,25 @@ public class ApiRequest
     /// <summary>
     /// Заголовки ответа.
     /// </summary>
-    public Dictionary<string, List<string>> Headers { get; set; }
+    public Dictionary<string, List<string>>? Headers { get; set; }
     /// <summary>
     /// Тип объекта, который сериализован в тело ответа.
     /// </summary>
-    public string BodyType { get; set; }
+    public string? BodyType { get; set; }
     /// <summary>
     /// Тело ответа.
     /// </summary>
-    public byte[] Body { get; set; }
+    public byte[]? Body { get; set; }
     /// <summary>
     /// Тип результата запроса (IActionResult).
     /// </summary>
-    public string ResultType { get; set; }
+    public string? ResultType { get; set; }
     /// <summary>
     /// Название маршрута, по которому сгенерирован URL в случае создания объекта (CreatedAtRouteResult).
     /// </summary>
-    public string ResultRouteName { get; set; }
+    public string? ResultRouteName { get; set; }
     /// <summary>
     /// Данные, с помощью которых построен результирующий маршрут (CreatedAtRouteResult).
     /// </summary>
-    public Dictionary<string, string> ResultRouteValues { get; set; }
+    public Dictionary<string, string?>? ResultRouteValues { get; set; }
 }

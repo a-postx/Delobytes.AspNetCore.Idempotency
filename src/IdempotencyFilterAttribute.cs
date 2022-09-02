@@ -74,20 +74,33 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
                 string key = $"{_options.CacheKeysPrefix}:{idempotencyKey}";
 
                 string method = context.HttpContext.Request.Method;
-                string path = context.HttpContext.Request.Path.HasValue ? context.HttpContext.Request.Path.Value : null;
-                string query = context.HttpContext.Request.QueryString.HasValue ? context.HttpContext.Request.QueryString.ToUriComponent() : null;
+                string? path = context.HttpContext.Request.Path.HasValue ? context.HttpContext.Request.Path.Value : null;
+                string? query = context.HttpContext.Request.QueryString.HasValue ? context.HttpContext.Request.QueryString.ToUriComponent() : null;
 
-                (bool requestCreated, ApiRequest request) = await GetOrCreateRequestAsync(idempotencyKey, method, path, query);
+                (bool requestCreated, ApiRequest? request) = await GetOrCreateRequestAsync(idempotencyKey, method, path, query);
 
                 if (!requestCreated)
                 {
-                    HandleRequestNotCreated(context, request, method, path, query);
-                    return;
+                    if (request != null)
+                    {
+                        UpdateContextWithCachedResult(context, request, method, path, query);
+                        return;
+                    }
+                    else
+                    {
+                        if (!_options.Optional)
+                        {
+                            throw new IdempotencyException("Error getting cached request");
+                        }
+                    }
                 }
 
                 ResourceExecutedContext executedContext = await next.Invoke();
 
-                await UpdateRequestWithResponseDataAsync(executedContext, request, key);
+                if (requestCreated && request != null)
+                {
+                    await UpdateRequestWithResponseDataAsync(executedContext, request, key);
+                }
             }
         }
         else
@@ -96,7 +109,7 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
         }
     }
 
-    private async Task<(bool created, ApiRequest request)> GetOrCreateRequestAsync(string idempotencyKey, string method, string path, string query)
+    private async Task<(bool created, ApiRequest? request)> GetOrCreateRequestAsync(string idempotencyKey, string method, string? path, string? query)
     {
         string key = $"{_options.CacheKeysPrefix}:{idempotencyKey}";
 
@@ -122,15 +135,22 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
 
         if (cachedApiRequest is not null && cachedApiRequest.Length > 0)
         {
-            ApiRequest requestFromCache = JsonSerializer.Deserialize<ApiRequest>(cachedApiRequest, _serializerOptions);
+            ApiRequest? requestFromCache = null;
+
+            try
+            {
+                requestFromCache = JsonSerializer.Deserialize<ApiRequest>(cachedApiRequest, _serializerOptions);
+            }
+            catch (JsonException ex)
+            {
+                _log.LogError(ex, "Error deserializing cached value for key {CacheKey}", key);
+            }
 
             return (false, requestFromCache);
         }
         else
         {
-            ApiRequest apiRequest = new ApiRequest();
-            apiRequest.ApiRequestID = idempotencyKey;
-            apiRequest.Method = method;
+            ApiRequest apiRequest = new ApiRequest(idempotencyKey, method);
             apiRequest.Path = path;
             apiRequest.Query = query;
 
@@ -158,13 +178,8 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
         }
     }
 
-    private void HandleRequestNotCreated(ResourceExecutingContext context, ApiRequest request, string method, string path, string query)
+    private void UpdateContextWithCachedResult(ResourceExecutingContext context, ApiRequest request, string method, string? path, string? query)
     {
-        if (request is null)
-        {
-            throw new IdempotencyException("Failed to create request.");
-        }
-
         if (method != request.Method || path != request.Path || query != request.Query)
         {
             context.Result = new ConflictObjectResult("В кеше исполнения уже есть запрос с таким идентификатором и его параметры отличны от текущего запроса.");
@@ -172,6 +187,11 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
         }
 
         context.HttpContext.Response.StatusCode = request.StatusCode ?? 0;
+
+        if (request.Headers == null)
+        {
+            throw new IdempotencyException("Response headers is not found.");
+        }
 
         string outputMediaType = string.Empty;
 
@@ -187,12 +207,26 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
             }
         }
 
-        Type contextResultType = Type.GetType(request.ResultType);
+        if (outputMediaType == string.Empty)
+        {
+            throw new IdempotencyException("Output media type type is not found.");
+        }
+
+        if (request.ResultType == null)
+        {
+            throw new IdempotencyException("Result type is not found.");
+        }
+
+        Type? contextResultType = Type.GetType(request.ResultType);
+
+        if (contextResultType == null)
+        {
+            throw new IdempotencyException("Cannot get result type.");
+        }
 
         if (contextResultType == typeof(CreatedAtRouteResult))
         {
-            Type bodyType = Type.GetType(request.BodyType);
-            object bodyObject = JsonSerializer.Deserialize(request.Body, bodyType, _serializerOptions);
+            (object? bodyObject, Type bodyType) = GetBodyObject(request);
 
             CreatedAtRouteResult result = new CreatedAtRouteResult(request.ResultRouteName, request.ResultRouteValues, bodyObject);
             result.DeclaredType = bodyType;
@@ -205,8 +239,7 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
         }
         else if (contextResultType.BaseType == typeof(ObjectResult))
         {
-            Type bodyType = Type.GetType(request.BodyType);
-            object bodyObject = JsonSerializer.Deserialize(request.Body, bodyType, _serializerOptions);
+            (object? bodyObject, Type bodyType) = GetBodyObject(request);
 
             ObjectResult result = new ObjectResult(bodyObject)
             {
@@ -219,8 +252,7 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
 
             context.Result = result;
         }
-        else if (contextResultType.BaseType == typeof(StatusCodeResult)
-            || contextResultType.BaseType == typeof(ActionResult))
+        else if (contextResultType.BaseType == typeof(StatusCodeResult) || contextResultType.BaseType == typeof(ActionResult))
         {
             context.Result = new StatusCodeResult(request.StatusCode ?? 0);
         }
@@ -250,8 +282,8 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
 
                     request.ResultRouteName = createdRequestResult.RouteName;
 
-                    Dictionary<string, string> routeValues = createdRequestResult
-                        .RouteValues.ToDictionary(r => r.Key, r => r.Value.ToString());
+                    Dictionary<string, string?>? routeValues = createdRequestResult
+                        .RouteValues?.ToDictionary(r => r.Key, r => r.Value?.ToString());
                     request.ResultRouteValues = routeValues;
 
                     break;
@@ -320,7 +352,7 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
 
     private void SetBody(ApiRequest request, ObjectResult objectRequestResult)
     {
-        string bodyType = objectRequestResult.Value.GetType().AssemblyQualifiedName;
+        string? bodyType = objectRequestResult.Value?.GetType().AssemblyQualifiedName;
         request.BodyType = bodyType;
         byte[] body = JsonSerializer.SerializeToUtf8Bytes(objectRequestResult.Value, _serializerOptions);
         request.Body = body;
@@ -333,11 +365,11 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
             return CreateJsonFormatter(mediaType, formatterType);
         }
 
-        OutputFormatter properFormatter = null;
+        OutputFormatter? properFormatter = null;
 
         foreach (IOutputFormatter formatter in _mvcOptions.OutputFormatters)
         {
-            OutputFormatter outputFormatter = formatter as OutputFormatter;
+            OutputFormatter? outputFormatter = formatter as OutputFormatter;
 
             if (outputFormatter is not null)
             {
@@ -356,8 +388,6 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
 
     private static OutputFormatter CreateJsonFormatter(string mediaType, OutputFormatterType formatterType)
     {
-        OutputFormatter result = null;
-
         switch (formatterType)
         {
             case OutputFormatterType.Newtonsoft:
@@ -368,8 +398,7 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
                     newtonsoftFormatter.SupportedMediaTypes.Insert(0, mediaType);
                 }
 
-                result = newtonsoftFormatter;
-                break;
+                return newtonsoftFormatter;
 
             case OutputFormatterType.SystemText:
                 SystemTextJsonOutputFormatter systemtextFormatter = GetSystemTextJsonOutputFormatter();
@@ -379,14 +408,11 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
                     systemtextFormatter.SupportedMediaTypes.Insert(0, mediaType);
                 }
 
-                result = systemtextFormatter;
-                break;
+                return systemtextFormatter;
 
             default:
                 throw new NotImplementedException($"Body output formatter for type '{formatterType}' is not implemented.");
         }
-
-        return result;
     }
 
     private static SystemTextJsonOutputFormatter GetSystemTextJsonOutputFormatter()
@@ -418,5 +444,24 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
         return mvcOptions.OutputFormatters
             .OfType<NewtonsoftJsonOutputFormatter>()
             .Last();
+    }
+
+    private (object? body, Type bodyType) GetBodyObject(ApiRequest request)
+    {
+        if (request.BodyType == null)
+        {
+            throw new IdempotencyException("Body type not found");
+        }
+
+        Type? bodyType = Type.GetType(request.BodyType);
+
+        if (bodyType == null)
+        {
+            throw new IdempotencyException($"Type for {request.BodyType} is not found");
+        }
+
+        object? bodyObject = JsonSerializer.Deserialize(request.Body, bodyType, _serializerOptions);
+
+        return (bodyObject, bodyType);
     }
 }

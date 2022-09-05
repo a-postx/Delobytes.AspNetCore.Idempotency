@@ -19,8 +19,6 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: true
   # Set the build number in MinVer.
   MINVERBUILDMETADATA: build.${{github.run_number}}
-  # Set Yandex Cloud private key
-  YC_PRIVATE_KEY: ${{ secrets.YC_PRIVATE_KEY }}
 
 jobs:
   build:

@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <TargetFramework>net6.0</TargetFramework>
-	<Version>3.0.0.0-alpha2</Version>
+	<Version>3.0.0.0-alpha3</Version>
     <LangVersion>latest</LangVersion>
     <Authors>Алексей Якубин</Authors>
     <Company>Делобайты</Company>

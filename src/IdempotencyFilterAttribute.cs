@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -71,13 +72,13 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
             }
             else
             {
-                string key = $"{_options.CacheKeysPrefix}:{idempotencyKey}";
+                string cacheKey = $"{_options.CacheKeysPrefix}:{idempotencyKey}";
 
                 string method = context.HttpContext.Request.Method;
                 string? path = context.HttpContext.Request.Path.HasValue ? context.HttpContext.Request.Path.Value : null;
                 string? query = context.HttpContext.Request.QueryString.HasValue ? context.HttpContext.Request.QueryString.ToUriComponent() : null;
 
-                (bool requestCreated, ApiRequest? request) = await GetOrCreateRequestAsync(idempotencyKey, method, path, query);
+                (bool requestCreated, ApiRequest? request) = await GetOrCreateRequestAsync(context.HttpContext, idempotencyKey, cacheKey, method, path, query);
 
                 if (!requestCreated)
                 {
@@ -99,7 +100,7 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
 
                 if (requestCreated && request != null)
                 {
-                    await UpdateRequestWithResponseDataAsync(executedContext, request, key);
+                    await UpdateRequestWithResponseDataAsync(executedContext, request, cacheKey);
                 }
             }
         }
@@ -109,21 +110,29 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
         }
     }
 
-    private async Task<(bool created, ApiRequest? request)> GetOrCreateRequestAsync(string idempotencyKey, string method, string? path, string? query)
+    private async Task<(bool created, ApiRequest? request)> GetOrCreateRequestAsync(HttpContext ctx, string idempotencyKey, string cacheKey, string method, string? path, string? query)
     {
-        string key = $"{_options.CacheKeysPrefix}:{idempotencyKey}";
-
         string cachedApiRequest;
 
         DateTime startGetDt = DateTime.UtcNow;
 
         try
         {
-            cachedApiRequest = await _distributedCache.GetStringAsync(key);
+            if (_options.CacheRequestTimeoutMs > 0)
+            {
+                CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
+                cts.CancelAfter(_options.CacheRequestTimeoutMs);
+
+                cachedApiRequest = await _distributedCache.GetStringAsync(cacheKey, cts.Token);
+            }
+            else
+            {
+                cachedApiRequest = await _distributedCache.GetStringAsync(cacheKey);
+            }
         }
         catch (Exception ex)
         {
-            _log.LogError(ex, "Error getting cached value for key {CacheKey}", key);
+            _log.LogError(ex, "Error getting cached value for key {CacheKey}", cacheKey);
             return (false, null);
         }
         finally
@@ -143,7 +152,7 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
             }
             catch (JsonException ex)
             {
-                _log.LogError(ex, "Error deserializing cached value for key {CacheKey}", key);
+                _log.LogError(ex, "Error deserializing cached value for key {CacheKey}", cacheKey);
             }
 
             return (false, requestFromCache);
@@ -160,11 +169,11 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
 
             try
             {
-                await _distributedCache.SetStringAsync(key, serializedRequest, new DistributedCacheEntryOptions { AbsoluteExpiration = DateTimeOffset.UtcNow.AddDays(1) });
+                await _distributedCache.SetStringAsync(cacheKey, serializedRequest, new DistributedCacheEntryOptions { AbsoluteExpiration = DateTimeOffset.UtcNow.AddDays(1) });
             }
             catch (Exception ex)
             {
-                _log.LogError(ex, "Error adding cached value for key {CacheKey}", key);
+                _log.LogError(ex, "Error adding cached value for key {CacheKey}", cacheKey);
                 return (false, null);
             }
             finally
@@ -182,7 +191,8 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
     {
         if (method != request.Method || path != request.Path || query != request.Query)
         {
-            context.Result = new ConflictObjectResult("В кеше исполнения уже есть запрос с таким идентификатором и его параметры отличны от текущего запроса.");
+            _log.LogInformation("Idempotency cache already contains {ApiRequestID} and its properties are different from the current request", request.ApiRequestID);
+            context.Result = new ConflictObjectResult($"В кеше исполнения уже есть запрос с идентификатором идемпотентности {request.ApiRequestID} и его параметры отличны от текущего запроса.");
             return;
         }
 
@@ -309,7 +319,7 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
             }
         }
 
-        bool requestUpdatedSuccessfully = await SetResponseInCacheAsync(cacheKey, request);
+        bool requestUpdatedSuccessfully = await SetResponseInCacheAsync(executedContext, cacheKey, request);
 
         if (!requestUpdatedSuccessfully)
         {
@@ -317,7 +327,7 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
         }
     }
 
-    private async Task<bool> SetResponseInCacheAsync(string key, ApiRequest apiRequest)
+    private async Task<bool> SetResponseInCacheAsync(ResourceExecutedContext context, string key, ApiRequest apiRequest)
     {
         string serializedRequest = JsonSerializer.Serialize(apiRequest, _serializerOptions);
 
@@ -325,7 +335,21 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
 
         try
         {
-            await _distributedCache.SetStringAsync(key, serializedRequest, new DistributedCacheEntryOptions { AbsoluteExpiration = DateTimeOffset.UtcNow.AddDays(1) });
+            DistributedCacheEntryOptions cacheOpts = new DistributedCacheEntryOptions {
+                AbsoluteExpiration = DateTimeOffset.UtcNow.AddHours(_options.CacheAbsoluteExpirationHrs)
+            };
+
+            if (_options.CacheRequestTimeoutMs > 0)
+            {
+                CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(context.HttpContext.RequestAborted);
+                cts.CancelAfter(_options.CacheRequestTimeoutMs);
+
+                await _distributedCache.SetStringAsync(key, serializedRequest, cacheOpts, cts.Token);
+            }
+            else
+            {
+                await _distributedCache.SetStringAsync(key, serializedRequest, cacheOpts);
+            }
         }
         catch (Exception ex)
         {

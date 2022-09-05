@@ -2,9 +2,11 @@ name: 'Build, test and publish packages'
 
 on:
   push:
-    branches: [ master ]
+    tags:
+      - v*.*
   pull_request:
-    branches: [ master ]
+    tags:
+      - v*.*
 
 env:
   # Disable the .NET logo in the console output.
@@ -15,6 +17,8 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: true
   # Set the build number in MinVer.
   MINVERBUILDMETADATA: build.${{github.run_number}}
+  # Set Yandex Cloud private key
+  YC_PRIVATE_KEY: ${{ secrets.YC_PRIVATE_KEY }}
 
 jobs:
   build:
@@ -22,14 +26,20 @@ jobs:
     runs-on: ${{matrix.os}}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest]
     steps:
     - name: 'Checkout'
       uses: actions/checkout@v2
     - name: 'Setup .NET Core'
-      uses: actions/setup-dotnet@v1
+      uses: actions/setup-dotnet@v2.0.0
       with:
         dotnet-version: '6.0.x'
+    - uses: actions/cache@v3
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/packages.lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget
     - name: 'Install dependencies'
       run: dotnet restore
     - name: 'Build'
@@ -38,40 +48,52 @@ jobs:
       run: dotnet test --no-restore --verbosity normal
     - name: 'Pack'
       run: dotnet pack --no-build --configuration Release src/Delobytes.AspNetCore.Idempotency.csproj --output distr
-    - name: 'Publish Artefacts'
-      uses: actions/upload-artifact@v2
+    - name: 'Upload package'
+      uses: actions/upload-artifact@v3.0.0
       with:
         name: ${{matrix.os}}
-        path: distr
+        path: "distr"
+        if-no-files-found: error
+        retention-days: 1
 
-  push-github-packages:
+  check-tag:
+    name: 'Check tag'
+    runs-on: ubuntu-latest
+    outputs:
+      tagName: ${{ steps.tagName.outputs.tag }}
+    steps:
+    - name: 'Get tag'
+      id: tag
+      uses: dawidd6/action-get-tag@v1
+      with:
+        strip_v: true
+    - name: 'Fail if no tag'
+      if: ${{ steps.tag.outputs.tag == '' }}
+      run: exit 1
+
+  push-github-package:
     name: 'Push GitHub Package'
-    needs: build
-    runs-on: windows-latest
+    needs: [build, check-tag]
+    if: success()
+    runs-on: ubuntu-latest
     steps:
-      - name: 'Download Artefact'
-        uses: actions/download-artifact@v2
-        with:
-          name: 'windows-latest'
-      - name: 'Dotnet NuGet Add Source'
-        run: dotnet nuget add source https://nuget.pkg.github.com/Delobytes.AspNetCore.Idempotency/index.json --name GitHub --username a-postx --password ${{secrets.GITHUB_TOKEN}}
-        shell: pwsh
-      - name: 'Dotnet NuGet Push'
-        run: dotnet nuget push .\*.nupkg --api-key ${{ github.token }} --source GitHub --skip-duplicate
-        shell: pwsh
+    - name: 'Download Artefact'
+      uses: actions/download-artifact@v3.0.0
+      with:
+        name: 'ubuntu-latest'
+    - name: 'Dotnet NuGet Push'
+      run: |
+        dotnet nuget push *.nupkg --source https://nuget.pkg.github.com/Delobytes.AspNetCore.Idempotency/index.json --skip-duplicate --api-key ${{ github.token }}
 
-  push-nuget:
+  push-nuget-package:
     name: 'Push NuGet Package'
-    needs: build
-    runs-on: windows-latest
+    needs: [build, check-tag]
+    runs-on: ubuntu-latest
     steps:
-      - name: 'Download Artefact'
-        uses: actions/download-artifact@v1
-        with:
-          name: 'windows-latest'
-      - name: 'Dotnet NuGet Push'
-        run: |
-          Get-ChildItem .\windows-latest -Filter *.nupkg |
-          Where-Object { !$_.Name.Contains('preview') } |
-          ForEach-Object { dotnet nuget push $_ --source https://api.nuget.org/v3/index.json --skip-duplicate --api-key ${{secrets.NUGET_API_KEY}} }
-        shell: pwsh
+    - name: 'Download Artefact'
+      uses: actions/download-artifact@v3.0.0
+      with:
+        name: 'ubuntu-latest'
+    - name: 'Dotnet NuGet Push'
+      run: |
+        dotnet nuget push *.nupkg --skip-duplicate --source https://api.nuget.org/v3/index.json --api-key ${{secrets.NUGET_API_KEY}}

@@ -9,15 +9,15 @@ public class IdempotencyControlOptions
     /// <para>
     /// Включает контроль идемпотентности.
     /// </para>
-    /// <para>Default: Idempotency-Key</para>
+    /// <para>Default: true</para>
     /// </summary>
     public bool Enabled { get; set; } = true;
 
     /// <summary>
     /// <para>
     /// Флаг, разрешающий благополучную отработку запроса если на уровне идемпотентности произошёл сбой.
-    /// Если контроль идемпотентности более важен, чем отказ в обслуживании (финансовое приложение),
-    /// то вы можете отключить этот флаг.
+    /// Если контроль идемпотентности более важен, чем отказ в обслуживании (напр. финансовое приложение),
+    /// то вы можете отключить эту опцию.
     /// </para>
     /// <para>Default: true</para>
     /// </summary>
@@ -34,7 +34,7 @@ public class IdempotencyControlOptions
 
     /// <summary>
     /// <para>
-    /// Заголовок идемпотентности, значение которого нужно обрабатывать.
+    /// Заголовок идемпотентности, значение которого нужно обрабатывать как идентификатор запроса.
     /// </para>
     /// <para>Default: Idempotency-Key</para>
     /// </summary>
@@ -47,6 +47,24 @@ public class IdempotencyControlOptions
     /// <para>Default: idempotency_keys</para>
     /// </summary>
     public string CacheKeysPrefix { get; set; } = "idempotency_keys";
+
+    /// <summary>
+    /// <para>
+    /// Время (в часах), по прошествии которого значение будет удалено из кеша. 
+    /// </para>
+    /// <para>Default: 24</para>
+    /// </summary>
+    public int CacheAbsoluteExpirationHrs { get; set; } = 24;
+
+    /// <summary>
+    /// <para>
+    /// Таймаут обращений к кешу.
+    /// Если больше нуля, то запрос к кешу будет отменён через указанное кол-во милисекунд.
+    /// Параметром можно контролировать скорость отключения обработчика в случае проблем с кешем. 
+    /// </para>
+    /// <para>Default: 0</para>
+    /// </summary>
+    public int CacheRequestTimeoutMs { get; set; } = 0;
 
     /// <summary>
     /// <para>

@@ -13,6 +13,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Primitives;
+using Microsoft.Net.Http.Headers;
 
 namespace Delobytes.AspNetCore.Idempotency;
 
@@ -211,15 +212,10 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
 
             context.HttpContext.Response.Headers[item.Key] = headerValue;
 
-            if (string.Equals(item.Key, "Content-Type", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(item.Key, HeaderNames.ContentType, StringComparison.OrdinalIgnoreCase))
             {
                 outputMediaType = headerValue;
             }
-        }
-
-        if (outputMediaType == string.Empty)
-        {
-            throw new IdempotencyException("Output media type type is not found.");
         }
 
         if (request.ResultType == null)
@@ -236,6 +232,11 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
 
         if (contextResultType == typeof(CreatedAtRouteResult))
         {
+            if (outputMediaType == string.Empty)
+            {
+                throw new IdempotencyException("Output media type type is not found.");
+            }
+
             (object? bodyObject, Type bodyType) = GetBodyObject(request);
 
             CreatedAtRouteResult result = new CreatedAtRouteResult(request.ResultRouteName, request.ResultRouteValues, bodyObject);
@@ -249,6 +250,11 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
         }
         else if (contextResultType.BaseType == typeof(ObjectResult))
         {
+            if (outputMediaType == string.Empty)
+            {
+                throw new IdempotencyException("Output media type type is not found.");
+            }
+
             (object? bodyObject, Type bodyType) = GetBodyObject(request);
 
             ObjectResult result = new ObjectResult(bodyObject)

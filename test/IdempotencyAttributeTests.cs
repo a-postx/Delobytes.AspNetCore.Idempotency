@@ -540,7 +540,7 @@ public class IdempotencyAttributeTests
         cachedApiRequest.Should().NotBeNullOrEmpty();
 
         JsonSerializerOptions serializerOptions = app.Services.GetRequiredService<JsonSerializerOptions>();        
-        ApiRequest? requestFromCache = JsonSerializer.Deserialize<ApiRequest>(cachedApiRequest, serializerOptions);
+        ApiRequest? requestFromCache = JsonSerializer.Deserialize<ApiRequest>(cachedApiRequest!, serializerOptions);
 
         requestFromCache.Should().NotBeNull();
         requestFromCache!.ApiRequestID.Should().Be(IdempotencyKey);

@@ -69,6 +69,11 @@
             Данные, с помощью которых построен результирующий маршрут (CreatedAtRouteResult).
             </summary>
         </member>
+        <member name="P:Delobytes.AspNetCore.Idempotency.ApiRequest.Location">
+            <summary>
+            Значение заголовка Location в случае создания объекта (Created) или задачи создания объекта (Accepted).
+            </summary>
+        </member>
         <member name="T:Delobytes.AspNetCore.Idempotency.IdempotencyControlOptions">
             <summary>
             Настройки контроля идемпотентности.
@@ -143,6 +148,26 @@
             <para>Default: <see cref="F:Delobytes.AspNetCore.Idempotency.OutputFormatterType.Newtonsoft"/></para>
             </summary>
         </member>
+        <member name="T:Delobytes.AspNetCore.Idempotency.IdempotencyEndpointFilter`1">
+            <summary>
+            Фильтр идемпотентности: сохраняет результаты запроса с ключом идемпотентности в кеш,
+            чтобы вернуть тот же ответ в случае запроса-дубликата.
+            Реализация по примеру https://stripe.com/docs/api/idempotent_requests
+            </summary>
+        </member>
+        <member name="M:Delobytes.AspNetCore.Idempotency.IdempotencyEndpointFilter`1.#ctor(Microsoft.Extensions.Logging.ILogger{Delobytes.AspNetCore.Idempotency.IdempotencyEndpointFilter{`0}},Microsoft.Extensions.Options.IOptions{Delobytes.AspNetCore.Idempotency.IdempotencyControlOptions},Microsoft.Extensions.Caching.Distributed.IDistributedCache,System.Text.Json.JsonSerializerOptions)">
+            <summary>
+            Конструктор.
+            </summary>
+        </member>
+        <member name="M:Delobytes.AspNetCore.Idempotency.IdempotencyEndpointFilter`1.InvokeAsync(Microsoft.AspNetCore.Http.EndpointFilterInvocationContext,Microsoft.AspNetCore.Http.EndpointFilterDelegate)">
+            <summary>
+            Проверяет идемпотентность и возвращает результат запроса из кеша если он уже был выполнен.
+            </summary>
+            <param name="context"></param>
+            <param name="next"></param>
+            <returns></returns>
+        </member>
         <member name="T:Delobytes.AspNetCore.Idempotency.IdempotencyException">
             <summary>
             Исключение идемпотентности.
@@ -165,7 +190,7 @@
         </member>
         <member name="T:Delobytes.AspNetCore.Idempotency.IdempotencyFilterAttribute">
             <summary>
-            Фильтр идемпотентности: сохраняет результаты запросов с ключом идемпотентности в кеш,
+            Фильтр идемпотентности: сохраняет результаты запроса с ключом идемпотентности в кеш,
             чтобы вернуть тот же ответ в случае запроса-дубликата.
             Реализация по примеру https://stripe.com/docs/api/idempotent_requests
             </summary>

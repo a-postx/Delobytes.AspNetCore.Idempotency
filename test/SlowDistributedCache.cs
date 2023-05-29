@@ -10,7 +10,7 @@ public class SlowDistributedCache : IDistributedCache
         throw new NotImplementedException();
     }
 
-    public async Task<byte[]> GetAsync(string key, CancellationToken token = default)
+    public async Task<byte[]?> GetAsync(string key, CancellationToken token = default)
     {
         await Task.Delay(4000, token);
         throw new NotImplementedException();

@@ -41,7 +41,7 @@ public class ApiRequest
     /// <summary>
     /// Заголовки ответа.
     /// </summary>
-    public Dictionary<string, List<string>>? Headers { get; set; }
+    public Dictionary<string, List<string?>>? Headers { get; set; }
     /// <summary>
     /// Тип объекта, который сериализован в тело ответа.
     /// </summary>
@@ -62,4 +62,8 @@ public class ApiRequest
     /// Данные, с помощью которых построен результирующий маршрут (CreatedAtRouteResult).
     /// </summary>
     public Dictionary<string, string?>? ResultRouteValues { get; set; }
+    /// <summary>
+    /// Значение заголовка Location в случае создания объекта (Created) или задачи создания объекта (Accepted).
+    /// </summary>
+    public string? Location { get; set; }
 }

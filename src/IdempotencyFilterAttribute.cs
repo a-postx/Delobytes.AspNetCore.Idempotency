@@ -18,7 +18,7 @@ using Microsoft.Net.Http.Headers;
 namespace Delobytes.AspNetCore.Idempotency;
 
 /// <summary>
-/// Фильтр идемпотентности: сохраняет результаты запросов с ключом идемпотентности в кеш,
+/// Фильтр идемпотентности: сохраняет результаты запроса с ключом идемпотентности в кеш,
 /// чтобы вернуть тот же ответ в случае запроса-дубликата.
 /// Реализация по примеру https://stripe.com/docs/api/idempotent_requests
 /// </summary>
@@ -113,7 +113,7 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
 
     private async Task<(bool created, ApiRequest? request)> GetOrCreateRequestAsync(HttpContext ctx, string idempotencyKey, string cacheKey, string method, string? path, string? query)
     {
-        string cachedApiRequest;
+        string? cachedApiRequest;
 
         DateTime startGetDt = DateTime.UtcNow;
 
@@ -206,7 +206,7 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
 
         string outputMediaType = string.Empty;
 
-        foreach (KeyValuePair<string, List<string>> item in request.Headers)
+        foreach (KeyValuePair<string, List<string?>> item in request.Headers)
         {
             string headerValue = string.Join(";", item.Value);
 

@@ -59,18 +59,6 @@ public class IdempotencyAttributeTests
         return app;
     }
 
-    private WebApplication CreateGoodCacheApplication(Action<IdempotencyControlOptions> options)
-    {
-        WebApplicationBuilder builder = WebApplication.CreateBuilder();
-
-        builder.Services.AddDistributedMemoryCache();
-        builder.Services.AddIdempotencyControl(options);
-
-        WebApplication app = builder.Build();
-
-        return app;
-    }
-
     private WebApplication CreateBadCacheApplication(Action<IdempotencyControlOptions> options)
     {
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
@@ -429,7 +417,7 @@ public class IdempotencyAttributeTests
     [Fact]
     public async Task IdempotencyControl_Runs_Transparently_WhenRequestIsNew()
     {
-        WebApplication app = CreateGoodCacheApplication(RegularOptions);
+        WebApplication app = CreateApplication(RegularOptions);
         IdempotencyFilterAttribute attr = app.Services.GetRequiredService<IdempotencyFilterAttribute>();
 
         HttpContext preCtx = GetHttpContextWithRequest(RequestHeadersWithKey);
@@ -472,7 +460,7 @@ public class IdempotencyAttributeTests
             options.BodyOutputFormatterType = OutputFormatterType.SystemText;
         };
 
-        WebApplication app = CreateGoodCacheApplication(opt);
+        WebApplication app = CreateApplication(opt);
         IdempotencyFilterAttribute attr = app.Services.GetRequiredService<IdempotencyFilterAttribute>();
 
         HttpContext preCtx = GetHttpContextWithRequest(RequestHeadersWithKey);
@@ -516,7 +504,7 @@ public class IdempotencyAttributeTests
             options.CacheKeysPrefix = cacheKeyPrefix;
         };
 
-        WebApplication app = CreateGoodCacheApplication(opt);
+        WebApplication app = CreateApplication(opt);
 
         IdempotencyFilterAttribute attr = app.Services.GetRequiredService<IdempotencyFilterAttribute>();
 
@@ -558,7 +546,7 @@ public class IdempotencyAttributeTests
     [Fact]
     public async Task IdempotencyControl_ReturnFromCache_WhenRequestIsKnown_WithOkResult()
     {
-        WebApplication app = CreateGoodCacheApplication(RegularOptions);
+        WebApplication app = CreateApplication(RegularOptions);
         IdempotencyFilterAttribute attr = app.Services.GetRequiredService<IdempotencyFilterAttribute>();
 
         HttpContext preCtx = GetHttpContextWithRequest(RequestHeadersWithKey);
@@ -604,7 +592,7 @@ public class IdempotencyAttributeTests
     [Fact]
     public async Task IdempotencyControl_ReturnFromCache_WhenRequestIsKnown_WithOkObjectResult()
     {
-        WebApplication app = CreateGoodCacheApplication(RegularOptions);
+        WebApplication app = CreateApplication(RegularOptions);
         IdempotencyFilterAttribute attr = app.Services.GetRequiredService<IdempotencyFilterAttribute>();
 
         HttpContext preCtx = GetHttpContextWithRequest(RequestHeadersWithKey);
@@ -651,7 +639,7 @@ public class IdempotencyAttributeTests
     [Fact]
     public async Task IdempotencyControl_ReturnFromCache_WhenRequestIsKnown_WithCreatedAtResult()
     {
-        WebApplication app = CreateGoodCacheApplication(RegularOptions);
+        WebApplication app = CreateApplication(RegularOptions);
         IdempotencyFilterAttribute attr = app.Services.GetRequiredService<IdempotencyFilterAttribute>();
 
         HttpContext preCtx = GetHttpContextWithRequest(RequestHeadersWithKey);

@@ -15,7 +15,7 @@ namespace Delobytes.AspNetCore.Idempotency;
 public static class IdempotencyServiceCollectionExtensions
 {
     /// <summary>
-    /// Добавляет в <see cref="IServiceCollection"/> атрибут контроля идемпотентности.
+    /// Добавляет в <see cref="IServiceCollection"/> контроль идемпотентности.
     /// </summary>
     /// <param name="services"><see cref="IServiceCollection"/> в которую нужно добавить контроль идемпотентности.</param>
     /// <param name="configure"><see cref="Action{IdempotencyControlOptions}"/> для настройки <see cref="IdempotencyControlOptions"/>.</param>

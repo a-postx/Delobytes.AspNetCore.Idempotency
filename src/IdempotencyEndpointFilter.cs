@@ -84,7 +84,7 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
 
         if (cachedRequest is null)
         {
-            ApiRequest newRequest = new ApiRequest(cacheKey, method);
+            ApiRequest newRequest = new ApiRequest(idempotencyKey, method);
             newRequest.Path = path;
             newRequest.Query = query;
 
@@ -305,19 +305,19 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
         {
             if (resultType == typeof(Ok<T>))
             {
-                return TypedResults.Ok(bodyObject);
+                return TypedResults.Ok(bodyObject as T);
             }
 
             if (resultType == typeof(CreatedAtRoute<T>))
             {
                 return TypedResults
-                    .CreatedAtRoute(bodyObject, request.ResultRouteName, request.ResultRouteValues);
+                    .CreatedAtRoute(bodyObject as T, request.ResultRouteName, request.ResultRouteValues);
             }
 
             if (resultType == typeof(AcceptedAtRoute<T>))
             {
                 return TypedResults
-                    .AcceptedAtRoute(bodyObject, request.ResultRouteName, request.ResultRouteValues);
+                    .AcceptedAtRoute(bodyObject as T, request.ResultRouteName, request.ResultRouteValues);
             }
 
             if (resultType == typeof(BadRequest<ProblemDetails>))
@@ -347,38 +347,57 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
     private async Task UpdateRequestWithResponseDataAsync(EndpointFilterInvocationContext ctx,
         object? executedContext, ApiRequest request, string cacheKey)
     {
-        Type? contextType = executedContext?.GetType();
-
         request.Headers = ctx
             .HttpContext.Response.Headers.ToDictionary(h => h.Key, h => h.Value.ToList());
 
-        ////if (executedContext is not INestedHttpResult)
-        ////{
-        ////    throw new IdempotencyException("Failed to set request response: unknown result context.");
-        ////}
+        Type? contextType = executedContext?.GetType();
+
+        if (contextType == null)
+        {
+            throw new IdempotencyException("Unknown result context type");
+        }
+
+        if (executedContext is IStatusCodeHttpResult scResult)
+        {
+            request.StatusCode = scResult.StatusCode;
+        }
+
+        object? resultObject = null;
 
         if (executedContext is INestedHttpResult iresultCtx && iresultCtx.Result != null)
         {
-            if (iresultCtx.Result is IStatusCodeHttpResult scResult)
+            //Result содержит OK<T>
+            resultObject = iresultCtx.Result;
+        }
+        else if (executedContext is IValueHttpResult valueResult)
+        {
+            //.Value содержит T
+            resultObject = valueResult;
+        }
+
+        if (resultObject is not null)
+        {
+            request.ResultType = resultObject?.GetType().AssemblyQualifiedName;
+
+            if (resultObject is IStatusCodeHttpResult objScResult)
             {
-                request.StatusCode = scResult.StatusCode;
+                request.StatusCode = objScResult.StatusCode;
             }
 
-            Type resultType = iresultCtx.Result.GetType();
-            request.ResultType = resultType.AssemblyQualifiedName;
+            Type? resultType = resultObject?.GetType();
 
-            if (resultType.GenericTypeArguments.Length > 0)
+            if (resultType?.GenericTypeArguments.Length > 0)
             {
                 ////Type bodyType = resultType.GenericTypeArguments[0];
 
-                if (iresultCtx.Result is IValueHttpResult<T> typedResult)
+                if (executedContext is IValueHttpResult<T> typedResult)
                 {
                     ////Type? tp = typedResult.Value?.GetType();
 
                     request.BodyType = GetBodyTypeName(typedResult);
                     request.Body = GetSerializedBody(typedResult);
 
-                    if (iresultCtx.Result is CreatedAtRoute<T> createdRequestResult)
+                    if (executedContext is CreatedAtRoute<T> createdRequestResult)
                     {
                         request.ResultRouteName = createdRequestResult.RouteName;
 
@@ -387,12 +406,12 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
                         request.ResultRouteValues = routeValues;
                     }
                 }
-                else if (iresultCtx.Result is IValueHttpResult<string> stringResult)
+                else if (executedContext is IValueHttpResult<string> stringResult)
                 {
                     request.BodyType = GetBodyTypeName(stringResult);
                     request.Body = GetSerializedBody(stringResult);
                 }
-                else if (iresultCtx.Result is IValueHttpResult<ProblemDetails> pdResult)
+                else if (executedContext is IValueHttpResult<ProblemDetails> pdResult)
                 {
                     request.BodyType = GetBodyTypeName(pdResult);
                     request.Body = GetSerializedBody(pdResult);
@@ -404,16 +423,20 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
             }
             else
             {
-                if (resultType == typeof(Created) || resultType == typeof(Accepted))
+                if (contextType == typeof(Created) || contextType == typeof(Accepted))
                 {
-                    object? locationProp = resultType.GetProperty("Location")?.GetValue(iresultCtx.Result);
+                    object? locationProp = contextType.GetProperty("Location")?.GetValue(resultObject);
 
                     if (locationProp is not null && locationProp is string lp)
                     {
                         request.Location = lp;
                     }
                 }
+
+                request.BodyType = resultObject?.GetType().AssemblyQualifiedName;
+                request.Body = JsonSerializer.SerializeToUtf8Bytes(resultObject, _serializerOptions);
             }
+
         }
 
         bool requestUpdatedSuccessfully = await SetResponseInCacheAsync(cacheKey, request, ctx.HttpContext.RequestAborted);

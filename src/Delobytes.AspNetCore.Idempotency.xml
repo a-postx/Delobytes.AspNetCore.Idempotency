@@ -215,7 +215,7 @@
         </member>
         <member name="M:Delobytes.AspNetCore.Idempotency.IdempotencyServiceCollectionExtensions.AddIdempotencyControl(Microsoft.Extensions.DependencyInjection.IServiceCollection,System.Action{Delobytes.AspNetCore.Idempotency.IdempotencyControlOptions})">
             <summary>
-            Добавляет в <see cref="T:Microsoft.Extensions.DependencyInjection.IServiceCollection"/> атрибут контроля идемпотентности.
+            Добавляет в <see cref="T:Microsoft.Extensions.DependencyInjection.IServiceCollection"/> контроль идемпотентности.
             </summary>
             <param name="services"><see cref="T:Microsoft.Extensions.DependencyInjection.IServiceCollection"/> в которую нужно добавить контроль идемпотентности.</param>
             <param name="configure"><see cref="T:System.Action`1"/> для настройки <see cref="T:Delobytes.AspNetCore.Idempotency.IdempotencyControlOptions"/>.</param>

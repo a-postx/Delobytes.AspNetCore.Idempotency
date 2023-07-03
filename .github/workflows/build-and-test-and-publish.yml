@@ -27,11 +27,12 @@ jobs:
         os: [ubuntu-latest]
     steps:
     - name: 'Checkout'
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
     - name: 'Setup .NET Core'
-      uses: actions/setup-dotnet@v2.0.0
+      uses: actions/setup-dotnet@v3.0.2
       with:
-        dotnet-version: '6.0.x'
+        dotnet-version: '7.0.x'
+        dotnet-quality: preview
     - uses: actions/cache@v3
       with:
         path: ~/.nuget/packages
@@ -47,7 +48,7 @@ jobs:
     - name: 'Pack'
       run: dotnet pack --no-build --configuration Release src/Delobytes.AspNetCore.Idempotency.csproj --output distr
     - name: 'Upload package'
-      uses: actions/upload-artifact@v3.0.0
+      uses: actions/upload-artifact@v3.1.1
       with:
         name: ${{matrix.os}}
         path: "distr"
@@ -76,7 +77,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: 'Download Artefact'
-      uses: actions/download-artifact@v3.0.0
+      uses: actions/download-artifact@v3.0.1
       with:
         name: 'ubuntu-latest'
     - name: 'Dotnet NuGet Push'
@@ -89,7 +90,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: 'Download Artefact'
-      uses: actions/download-artifact@v3.0.0
+      uses: actions/download-artifact@v3.0.1
       with:
         name: 'ubuntu-latest'
     - name: 'Dotnet NuGet Push'

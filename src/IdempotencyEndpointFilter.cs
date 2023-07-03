@@ -377,27 +377,26 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
 
         if (resultObject is not null)
         {
-            request.ResultType = resultObject?.GetType().AssemblyQualifiedName;
-
             if (resultObject is IStatusCodeHttpResult objScResult)
             {
                 request.StatusCode = objScResult.StatusCode;
             }
 
-            Type? resultType = resultObject?.GetType();
+            Type resultType = resultObject.GetType();
+            request.ResultType = resultType.AssemblyQualifiedName;
 
-            if (resultType?.GenericTypeArguments.Length > 0)
+            if (resultType.GenericTypeArguments.Length > 0)
             {
                 ////Type bodyType = resultType.GenericTypeArguments[0];
 
-                if (executedContext is IValueHttpResult<T> typedResult)
+                if (resultObject is IValueHttpResult<T> typedResult)
                 {
                     ////Type? tp = typedResult.Value?.GetType();
 
                     request.BodyType = GetBodyTypeName(typedResult);
                     request.Body = GetSerializedBody(typedResult);
 
-                    if (executedContext is CreatedAtRoute<T> createdRequestResult)
+                    if (resultObject is CreatedAtRoute<T> createdRequestResult)
                     {
                         request.ResultRouteName = createdRequestResult.RouteName;
 
@@ -406,12 +405,12 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
                         request.ResultRouteValues = routeValues;
                     }
                 }
-                else if (executedContext is IValueHttpResult<string> stringResult)
+                else if (resultObject is IValueHttpResult<string> stringResult)
                 {
                     request.BodyType = GetBodyTypeName(stringResult);
                     request.Body = GetSerializedBody(stringResult);
                 }
-                else if (executedContext is IValueHttpResult<ProblemDetails> pdResult)
+                else if (resultObject is IValueHttpResult<ProblemDetails> pdResult)
                 {
                     request.BodyType = GetBodyTypeName(pdResult);
                     request.Body = GetSerializedBody(pdResult);
@@ -433,10 +432,9 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
                     }
                 }
 
-                request.BodyType = resultObject?.GetType().AssemblyQualifiedName;
+                request.BodyType = resultType.AssemblyQualifiedName;
                 request.Body = JsonSerializer.SerializeToUtf8Bytes(resultObject, _serializerOptions);
             }
-
         }
 
         bool requestUpdatedSuccessfully = await SetResponseInCacheAsync(cacheKey, request, ctx.HttpContext.RequestAborted);

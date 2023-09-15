@@ -155,8 +155,7 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
         }
         finally
         {
-            DateTime stopGetDt = DateTime.UtcNow;
-            TimeSpan processingTime = stopGetDt - startGetDt;
+            TimeSpan processingTime = DateTime.UtcNow - startGetDt;
             _log.LogInformation("cache.request.idempotency.get.msec {CacheRequestIdempotencyGetMsec}", (int)processingTime.TotalMilliseconds);
         }
 
@@ -209,8 +208,7 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
         }
         finally
         {
-            DateTime stopSetDt = DateTime.UtcNow;
-            TimeSpan processingTime = stopSetDt - startSetDt;
+            TimeSpan processingTime = DateTime.UtcNow - startSetDt;
             _log.LogInformation("cache.request.idempotency.create.msec {CacheRequestIdempotencyCreateMsec}", (int)processingTime.TotalMilliseconds);
         }
 
@@ -417,7 +415,7 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
                 }
                 else
                 {
-                    //что делать?
+                    throw new IdempotencyException($"Idempotency is not implemented for result type {resultObject.GetType()}");
                 }
             }
             else
@@ -484,8 +482,7 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
         }
         finally
         {
-            DateTime stopSetDt = DateTime.UtcNow;
-            TimeSpan processingTime = stopSetDt - startSetDt;
+            TimeSpan processingTime = DateTime.UtcNow - startSetDt;
             _log.LogInformation("cache.request.idempotency.update.msec {CacheRequestIdempotencyUpdateMsec}", (int)processingTime.TotalMilliseconds);
         }
 

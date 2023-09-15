@@ -138,8 +138,7 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
         }
         finally
         {
-            DateTime stopGetDt = DateTime.UtcNow;
-            TimeSpan processingTime = stopGetDt - startGetDt;
+            TimeSpan processingTime = DateTime.UtcNow - startGetDt;
             _log.LogInformation("cache.request.idempotency.get.msec {CacheRequestIdempotencyGetMsec}", (int)processingTime.TotalMilliseconds);
         }
 
@@ -179,8 +178,7 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
             }
             finally
             {
-                DateTime stopSetDt = DateTime.UtcNow;
-                TimeSpan processingTime = stopSetDt - startSetDt;
+                TimeSpan processingTime = DateTime.UtcNow - startSetDt;
                 _log.LogInformation("cache.request.idempotency.create.msec {CacheRequestIdempotencyCreateMsec}", (int)processingTime.TotalMilliseconds);
             }
 
@@ -209,7 +207,6 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
         foreach (KeyValuePair<string, List<string?>> item in request.Headers)
         {
             string headerValue = string.Join(";", item.Value);
-
             context.HttpContext.Response.Headers[item.Key] = headerValue;
 
             if (string.Equals(item.Key, HeaderNames.ContentType, StringComparison.OrdinalIgnoreCase))
@@ -364,8 +361,7 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
         }
         finally
         {
-            DateTime stopSetDt = DateTime.UtcNow;
-            TimeSpan processingTime = stopSetDt - startSetDt;
+            TimeSpan processingTime = DateTime.UtcNow - startSetDt;
             _log.LogInformation("cache.request.idempotency.update.msec {CacheRequestIdempotencyUpdateMsec}", (int)processingTime.TotalMilliseconds);
         }
 
@@ -382,10 +378,8 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
 
     private void SetBody(ApiRequest request, ObjectResult objectRequestResult)
     {
-        string? bodyType = objectRequestResult.Value?.GetType().AssemblyQualifiedName;
-        request.BodyType = bodyType;
-        byte[] body = JsonSerializer.SerializeToUtf8Bytes(objectRequestResult.Value, _serializerOptions);
-        request.Body = body;
+        request.BodyType = objectRequestResult.Value?.GetType().AssemblyQualifiedName;
+        request.Body = JsonSerializer.SerializeToUtf8Bytes(objectRequestResult.Value, _serializerOptions);
     }
 
     private OutputFormatter GetOutputFormatter(string mediaType, OutputFormatterType formatterType)
@@ -401,15 +395,10 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
         {
             OutputFormatter? outputFormatter = formatter as OutputFormatter;
 
-            if (outputFormatter is not null)
+            if (outputFormatter is not null && outputFormatter.SupportedMediaTypes.Any(e => e == mediaType))
             {
-                bool jsonUtf8Formatter = outputFormatter.SupportedMediaTypes.Any(e => e == mediaType);
-
-                if (jsonUtf8Formatter)
-                {
-                    properFormatter = outputFormatter;
-                    break;
-                }
+                properFormatter = outputFormatter;
+                break;
             }
         }
 

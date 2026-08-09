@@ -73,4 +73,17 @@ public class IdempotencyControlOptions
     /// <para>Default: <see cref="OutputFormatterType.Newtonsoft"/></para>
     /// </summary>
     public OutputFormatterType BodyOutputFormatterType { get; set; } = OutputFormatterType.Newtonsoft;
+
+    /// <summary>
+    /// <para>
+    /// Реестр типов тела ответа, разрешённых для восстановления из кеша в <see cref="IdempotencyFilterAttribute"/> (MVC).
+    /// </para>
+    /// <para>
+    /// Если ваш контроллер, помеченный <see cref="IdempotencyFilterAttribute"/>, возвращает тело
+    /// собственного DTO-типа, зарегистрируйте этот тип явно, иначе воспроизведение кешированного
+    /// ответа для такого типа завершится ошибкой <see cref="IdempotencyException"/>:
+    /// <code>options.BodyTypeRegistry.Add&lt;MyResponseDto&gt;();</code>
+    /// </para>
+    /// </summary>
+    public IdempotencyBodyTypeRegistry BodyTypeRegistry { get; } = new IdempotencyBodyTypeRegistry();
 }

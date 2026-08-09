@@ -43,17 +43,21 @@ public class ApiRequest
     /// </summary>
     public Dictionary<string, List<string?>>? Headers { get; set; }
     /// <summary>
-    /// Тип объекта, который сериализован в тело ответа.
+    /// Разновидность результата запроса.
     /// </summary>
-    public string? BodyType { get; set; }
+    public CachedResultKind ResultKind { get; set; }
+    /// <summary>
+    /// Разновидность тела ответа.
+    /// </summary>
+    public CachedBodyKind BodyKind { get; set; }
+    /// <summary>
+    /// Ключ типа тела ответа.
+    /// </summary>
+    public string? BodyTypeKey { get; set; }
     /// <summary>
     /// Тело ответа.
     /// </summary>
     public byte[]? Body { get; set; }
-    /// <summary>
-    /// Тип результата запроса (IActionResult).
-    /// </summary>
-    public string? ResultType { get; set; }
     /// <summary>
     /// Название маршрута, по которому сгенерирован URL в случае создания объекта (CreatedAtRouteResult).
     /// </summary>

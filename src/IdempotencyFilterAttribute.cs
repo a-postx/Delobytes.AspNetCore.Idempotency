@@ -215,63 +215,57 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
             }
         }
 
-        if (request.ResultType == null)
+        switch (request.ResultKind)
         {
-            throw new IdempotencyException("Result type is not found.");
-        }
-
-        Type? contextResultType = Type.GetType(request.ResultType);
-
-        if (contextResultType == null)
-        {
-            throw new IdempotencyException("Cannot get result type.");
-        }
-
-        if (contextResultType == typeof(CreatedAtRouteResult))
-        {
-            if (outputMediaType == string.Empty)
+            case CachedResultKind.MvcCreatedAtRouteResult:
             {
-                throw new IdempotencyException("Output media type type is not found.");
+                if (outputMediaType == string.Empty)
+                {
+                    throw new IdempotencyException("Output media type type is not found.");
+                }
+
+                (object? bodyObject, Type bodyType) = GetBodyObject(request);
+
+                CreatedAtRouteResult result = new CreatedAtRouteResult(request.ResultRouteName, request.ResultRouteValues, bodyObject);
+                result.DeclaredType = bodyType;
+                result.StatusCode = request.StatusCode;
+
+                OutputFormatter formatter = GetOutputFormatter(outputMediaType, _options.BodyOutputFormatterType);
+                result.Formatters.Add(formatter);
+
+                context.Result = result;
+                break;
             }
-
-            (object? bodyObject, Type bodyType) = GetBodyObject(request);
-
-            CreatedAtRouteResult result = new CreatedAtRouteResult(request.ResultRouteName, request.ResultRouteValues, bodyObject);
-            result.DeclaredType = bodyType;
-            result.StatusCode = request.StatusCode;
-
-            OutputFormatter formatter = GetOutputFormatter(outputMediaType, _options.BodyOutputFormatterType);
-            result.Formatters.Add(formatter);
-
-            context.Result = result;
-        }
-        else if (contextResultType.BaseType == typeof(ObjectResult))
-        {
-            if (outputMediaType == string.Empty)
+            case CachedResultKind.MvcObjectResult:
             {
-                throw new IdempotencyException("Output media type type is not found.");
+                if (outputMediaType == string.Empty)
+                {
+                    throw new IdempotencyException("Output media type type is not found.");
+                }
+
+                (object? bodyObject, Type bodyType) = GetBodyObject(request);
+
+                ObjectResult result = new ObjectResult(bodyObject)
+                {
+                    StatusCode = request.StatusCode,
+                    DeclaredType = bodyType
+                };
+
+                OutputFormatter formatter = GetOutputFormatter(outputMediaType, _options.BodyOutputFormatterType);
+                result.Formatters.Add(formatter);
+
+                context.Result = result;
+                break;
             }
-
-            (object? bodyObject, Type bodyType) = GetBodyObject(request);
-
-            ObjectResult result = new ObjectResult(bodyObject)
+            case CachedResultKind.MvcStatusCodeOnly:
             {
-                StatusCode = request.StatusCode,
-                DeclaredType = bodyType
-            };
-
-            OutputFormatter formatter = GetOutputFormatter(outputMediaType, _options.BodyOutputFormatterType);
-            result.Formatters.Add(formatter);
-
-            context.Result = result;
-        }
-        else if (contextResultType.BaseType == typeof(StatusCodeResult) || contextResultType.BaseType == typeof(ActionResult))
-        {
-            context.Result = new StatusCodeResult(request.StatusCode ?? 0);
-        }
-        else
-        {
-            throw new IdempotencyException($"Idempotency is not implemented for IActionResult type {contextResultType}");
+                context.Result = new StatusCodeResult(request.StatusCode ?? 0);
+                break;
+            }
+            default:
+            {
+                throw new IdempotencyException($"Idempotency is not implemented for cached result kind '{request.ResultKind}'.");
+            }
         }
 
         _log.LogInformation("Cached response returned from IdempotencyFilter.");
@@ -285,13 +279,13 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
 
         if (executedContext.Result != null)
         {
-            request.ResultType = executedContext.Result.GetType().AssemblyQualifiedName;
-
             switch (executedContext.Result)
             {
                 case CreatedAtRouteResult createdRequestResult:
                 {
-                    SetBody(request, createdRequestResult);
+                    request.ResultKind = CachedResultKind.MvcCreatedAtRouteResult;
+
+                    SetBody(request, createdRequestResult.Value);
 
                     request.ResultRouteName = createdRequestResult.RouteName;
 
@@ -303,7 +297,9 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
                 }
                 case ObjectResult objectRequestResult:
                 {
-                    SetBody(request, objectRequestResult);
+                    request.ResultKind = CachedResultKind.MvcObjectResult;
+
+                    SetBody(request, objectRequestResult.Value);
 
                     break;
                 }
@@ -312,12 +308,13 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
                 case StatusCodeResult statusCodeResult:
                 case ActionResult actionResult:
                 {
+                    request.ResultKind = CachedResultKind.MvcStatusCodeOnly;
                     // известные типы, которым не нужны дополнительные данные
                     break;
                 }
                 default:
                 {
-                    throw new IdempotencyException($"Idempotency is not implemented for result type {executedContext.GetType()}");
+                    throw new IdempotencyException($"Idempotency is not implemented for result type {executedContext.Result.GetType()}");
                 }
             }
         }
@@ -371,15 +368,17 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
     private string GetIdempotencyKeyHeaderValue(HttpContext httpContext)
     {
         return httpContext.Request.Headers
-            .TryGetValue(_options.IdempotencyHeader, out StringValues idempotencyKeyValue)
-            ? idempotencyKeyValue.ToString()
-            : string.Empty;
+            .TryGetValue(_options.IdempotencyHeader, out StringValues idempotencyKeyValue) ? idempotencyKeyValue.ToString() : string.Empty;
     }
 
-    private void SetBody(ApiRequest request, ObjectResult objectRequestResult)
+    private void SetBody(ApiRequest request, object? value)
     {
-        request.BodyType = objectRequestResult.Value?.GetType().AssemblyQualifiedName;
-        request.Body = JsonSerializer.SerializeToUtf8Bytes(objectRequestResult.Value, _serializerOptions);
+        if (value is not null)
+        {
+            request.BodyTypeKey = IdempotencyBodyTypeRegistry.GetKey(value.GetType());
+        }
+
+        request.Body = JsonSerializer.SerializeToUtf8Bytes(value, _serializerOptions);
     }
 
     private OutputFormatter GetOutputFormatter(string mediaType, OutputFormatterType formatterType)
@@ -467,16 +466,16 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
 
     private (object? body, Type bodyType) GetBodyObject(ApiRequest request)
     {
-        if (request.BodyType == null)
+        if (request.BodyTypeKey == null)
         {
             throw new IdempotencyException("Body type not found");
         }
 
-        Type? bodyType = Type.GetType(request.BodyType);
-
-        if (bodyType == null)
+        if (!_options.BodyTypeRegistry.TryResolve(request.BodyTypeKey, out Type? bodyType) || bodyType is null)
         {
-            throw new IdempotencyException($"Type for {request.BodyType} is not found");
+            throw new IdempotencyException(
+                $"Type '{request.BodyTypeKey}' is not registered in IdempotencyControlOptions.BodyTypeRegistry. " +
+                "Register it explicitly at startup via options.BodyTypeRegistry.Add<T>() to allow replaying cached responses of this type.");
         }
 
         object? bodyObject = JsonSerializer.Deserialize(request.Body, bodyType, _serializerOptions);

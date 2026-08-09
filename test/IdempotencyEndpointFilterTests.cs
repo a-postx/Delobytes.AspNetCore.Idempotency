@@ -375,13 +375,13 @@ public class IdempotencyEndpointFilterTests
         requestFromCache.Should().NotBeNull();
         requestFromCache!.ApiRequestID.Should().Be(IdempotencyKey);
         requestFromCache!.Body.Should().NotBeNull();
-        requestFromCache!.BodyType.Should().NotBeNullOrEmpty();
+        requestFromCache!.BodyKind.Should().NotBe(CachedBodyKind.None);
         requestFromCache!.Body.Should().NotBeNull();
         requestFromCache!.Headers.Should().NotBeNull();
         requestFromCache!.Method.Should().NotBeNullOrEmpty().And.Be(RequestMethod);
         requestFromCache!.Path.Should().NotBeNullOrEmpty().And.Be(RequestPath);
         requestFromCache!.Query.Should().NotBeNullOrEmpty().And.Be(RequestQueryString);
-        requestFromCache!.ResultType.Should().NotBeNullOrEmpty();
+        requestFromCache!.ResultKind.Should().NotBe(CachedResultKind.Unknown);
         requestFromCache!.StatusCode.Should().NotBeNull().And.Be(200);
     }
 

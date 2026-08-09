@@ -58,8 +58,6 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
             return await next.Invoke(context);
         }
 
-        ////T? param = (T?)context.Arguments.FirstOrDefault(x => x?.GetType() == typeof(T));
-
         string idempotencyKey = GetIdempotencyKeyHeaderValue(context.HttpContext);
 
         if (string.IsNullOrEmpty(idempotencyKey))
@@ -103,26 +101,19 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
         }
         else
         {
-            if (string.IsNullOrEmpty(cachedRequest.ResultType)) //выпало исключение?
+            if (cachedRequest.ResultKind == CachedResultKind.Unknown) //выпало исключение?
             {
                 _log.LogInformation("There is no cached response data for the request");
                 return TypedResults.StatusCode(500);
             }
 
-            Type? contextResultType = Type.GetType(cachedRequest.ResultType);
-
-            if (contextResultType == null)
-            {
-                throw new IdempotencyException("Error getting cached request: unknown result type");
-            }
-
             if (method != cachedRequest.Method || path != cachedRequest.Path || query != cachedRequest.Query)
             {
                 _log.LogInformation("Idempotency cache already contains {ApiRequestID} and its properties are different from the current request", cachedRequest.ApiRequestID);
-                return TypedResults.BadRequest($"В кеше исполнения уже есть запрос с идентификатором идемпотентности {cachedRequest.ApiRequestID} и его параметры отличны от текущего запроса.");
+                return TypedResults.Conflict($"В кеше исполнения уже есть запрос с идентификатором идемпотентности {cachedRequest.ApiRequestID} и его параметры отличны от текущего запроса.");
             }
 
-            return await GetCachedResultAsync(context, cachedRequest, context.HttpContext.RequestAborted);
+            return GetCachedResult(context, cachedRequest);
         }
     }
 
@@ -215,7 +206,7 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
         return true;
     }
 
-    private async Task<IResult> GetCachedResultAsync(EndpointFilterInvocationContext context, ApiRequest request, CancellationToken cancellationToken)
+    private IResult GetCachedResult(EndpointFilterInvocationContext context, ApiRequest request)
     {
         if (request.Headers != null)
         {
@@ -226,120 +217,83 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
             }
         }
 
-        Type? resultType = Type.GetType(request.ResultType!);
-
-        if (resultType == null)
-        {
-            throw new IdempotencyException("Cannot get result type.");
-        }
-
         _log.LogInformation("Cached response returned from IdempotencyFilter.");
 
-        if (resultType == typeof(StatusCodeHttpResult))
+        switch (request.ResultKind)
         {
-            return TypedResults.StatusCode(request.StatusCode ?? 0);
-        }
-        else if (resultType == typeof(Ok))
-        {
-            return TypedResults.Ok();
-        }
-        else if (resultType == typeof(Created))
-        {
-            if (request.Location is null)
+            case CachedResultKind.StatusCodeOnlyMinimalApi:
+                return TypedResults.StatusCode(request.StatusCode ?? 0);
+
+            case CachedResultKind.Ok:
+                return TypedResults.Ok();
+
+            case CachedResultKind.Created:
+                if (request.Location is null)
+                {
+                    throw new IdempotencyException("Location URL cannot be found");
+                }
+                return TypedResults.Created(request.Location);
+
+            case CachedResultKind.Accepted:
+                return TypedResults.Accepted(request.Location);
+
+            case CachedResultKind.NotFound:
+                return TypedResults.NotFound();
+
+            case CachedResultKind.Unauthorized:
+                return TypedResults.Unauthorized();
+
+            case CachedResultKind.UnprocessableEntity:
+                return TypedResults.UnprocessableEntity();
+
+            case CachedResultKind.Problem:
+                return TypedResults.Problem();
+
+            case CachedResultKind.BadRequest:
+                return TypedResults.BadRequest();
+
+            case CachedResultKind.Forbidden:
+                return TypedResults.Forbid();
+
+            case CachedResultKind.Conflict:
+                return TypedResults.Conflict();
+
+            case CachedResultKind.NoContent:
+                return TypedResults.NoContent();
+
+            case CachedResultKind.OkOfT:
             {
-                throw new IdempotencyException("Location URL cannot be found");
+                T? bodyObject = GetBodyObject<T>(request);
+                return TypedResults.Ok(bodyObject);
             }
 
-            return TypedResults.Created(request.Location);
-        }
-        else if (resultType == typeof(Accepted))
-        {
-            return TypedResults.Accepted(request.Location);
-        }
-        else if (resultType == typeof(NotFound))
-        {
-            return TypedResults.NotFound();
-        }
-        else if (resultType == typeof(UnauthorizedHttpResult))
-        {
-            return TypedResults.Unauthorized();
-        }
-        else if (resultType == typeof(UnprocessableEntity))
-        {
-            return TypedResults.UnprocessableEntity();
-        }
-        else if (resultType == typeof(ProblemHttpResult))
-        {
-            return TypedResults.Problem();
-        }
-        else if (resultType == typeof(BadRequest))
-        {
-            return TypedResults.BadRequest();
-        }
-        else if (resultType == typeof(NotFound))
-        {
-            return TypedResults.NotFound();
-        }
-        else if (resultType == typeof(UnauthorizedHttpResult))
-        {
-            return TypedResults.Unauthorized();
-        }
-        else if (resultType == typeof(ForbidHttpResult))
-        {
-            return TypedResults.Forbid();
-        }
-        else if (resultType == typeof(Conflict))
-        {
-            return TypedResults.Conflict();
-        }
-        else if (resultType == typeof(NoContent))
-        {
-            return TypedResults.NoContent();
-        }
-
-        object? bodyObject = GetBodyObject(request);
-
-        if (bodyObject != null)
-        {
-            if (resultType == typeof(Ok<T>))
+            case CachedResultKind.CreatedAtRouteOfT:
             {
-                return TypedResults.Ok(bodyObject as T);
+                T? bodyObject = GetBodyObject<T>(request);
+                return TypedResults.CreatedAtRoute(bodyObject, request.ResultRouteName, request.ResultRouteValues);
             }
 
-            if (resultType == typeof(CreatedAtRoute<T>))
+            case CachedResultKind.AcceptedAtRouteOfT:
             {
-                return TypedResults
-                    .CreatedAtRoute(bodyObject as T, request.ResultRouteName, request.ResultRouteValues);
+                T? bodyObject = GetBodyObject<T>(request);
+                return TypedResults.AcceptedAtRoute(bodyObject, request.ResultRouteName, request.ResultRouteValues);
             }
 
-            if (resultType == typeof(AcceptedAtRoute<T>))
+            case CachedResultKind.BadRequestOfProblemDetails:
             {
-                return TypedResults
-                    .AcceptedAtRoute(bodyObject as T, request.ResultRouteName, request.ResultRouteValues);
+                ProblemDetails? bodyObject = GetBodyObject<ProblemDetails>(request);
+                return TypedResults.BadRequest(bodyObject);
             }
 
-            if (resultType == typeof(BadRequest<ProblemDetails>))
+            case CachedResultKind.BadRequestOfString:
             {
-                return TypedResults.BadRequest(bodyObject as ProblemDetails);
+                string? bodyObject = GetBodyObject<string>(request);
+                return TypedResults.BadRequest(bodyObject);
             }
 
-            if (resultType == typeof(BadRequest<string>))
-            {
-                return TypedResults.BadRequest(bodyObject as string);
-            }
+            default:
+                throw new IdempotencyException($"Idempotency is not implemented for cached result kind '{request.ResultKind}'.");
         }
-
-        if (resultType.GetInterface(nameof(IStatusCodeHttpResult)) != null)
-        {
-            context.HttpContext.Response.StatusCode = request.StatusCode ?? 0;
-        }
-
-        if (resultType.GetInterface(nameof(IValueHttpResult<T>)) != null && bodyObject != null)
-        {
-            await context.HttpContext.Response.WriteAsJsonAsync(bodyObject, cancellationToken);
-        }
-
-        return TypedResults.Empty;
     }
 
     private async Task UpdateRequestWithResponseDataAsync(EndpointFilterInvocationContext ctx,
@@ -348,9 +302,7 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
         request.Headers = ctx
             .HttpContext.Response.Headers.ToDictionary(h => h.Key, h => h.Value.ToList());
 
-        Type? contextType = executedContext?.GetType();
-
-        if (contextType == null)
+        if (executedContext is null)
         {
             throw new IdempotencyException("Unknown result context type");
         }
@@ -360,79 +312,86 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
             request.StatusCode = scResult.StatusCode;
         }
 
-        object? resultObject = null;
-
-        if (executedContext is INestedHttpResult iresultCtx && iresultCtx.Result != null)
+        switch (executedContext)
         {
-            //Result содержит OK<T>
-            resultObject = iresultCtx.Result;
-        }
-        else if (executedContext is IValueHttpResult valueResult)
-        {
-            //.Value содержит T
-            resultObject = valueResult;
-        }
+            case Ok:
+                request.ResultKind = CachedResultKind.Ok;
+                break;
 
-        if (resultObject is not null)
-        {
-            if (resultObject is IStatusCodeHttpResult objScResult)
-            {
-                request.StatusCode = objScResult.StatusCode;
-            }
+            case Created createdResult:
+                request.ResultKind = CachedResultKind.Created;
+                request.Location = createdResult.Location;
+                break;
 
-            Type resultType = resultObject.GetType();
-            request.ResultType = resultType.AssemblyQualifiedName;
+            case Accepted acceptedResult:
+                request.ResultKind = CachedResultKind.Accepted;
+                request.Location = acceptedResult.Location;
+                break;
 
-            if (resultType.GenericTypeArguments.Length > 0)
-            {
-                ////Type bodyType = resultType.GenericTypeArguments[0];
+            case NotFound:
+                request.ResultKind = CachedResultKind.NotFound;
+                break;
 
-                if (resultObject is IValueHttpResult<T> typedResult)
-                {
-                    ////Type? tp = typedResult.Value?.GetType();
+            case UnauthorizedHttpResult:
+                request.ResultKind = CachedResultKind.Unauthorized;
+                break;
 
-                    request.BodyType = GetBodyTypeName(typedResult);
-                    request.Body = GetSerializedBody(typedResult);
+            case UnprocessableEntity:
+                request.ResultKind = CachedResultKind.UnprocessableEntity;
+                break;
 
-                    if (resultObject is CreatedAtRoute<T> createdRequestResult)
-                    {
-                        request.ResultRouteName = createdRequestResult.RouteName;
+            case ProblemHttpResult:
+                request.ResultKind = CachedResultKind.Problem;
+                break;
 
-                        Dictionary<string, string?>? routeValues = createdRequestResult
-                            .RouteValues?.ToDictionary(r => r.Key, r => r.Value?.ToString());
-                        request.ResultRouteValues = routeValues;
-                    }
-                }
-                else if (resultObject is IValueHttpResult<string> stringResult)
-                {
-                    request.BodyType = GetBodyTypeName(stringResult);
-                    request.Body = GetSerializedBody(stringResult);
-                }
-                else if (resultObject is IValueHttpResult<ProblemDetails> pdResult)
-                {
-                    request.BodyType = GetBodyTypeName(pdResult);
-                    request.Body = GetSerializedBody(pdResult);
-                }
-                else
-                {
-                    throw new IdempotencyException($"Idempotency is not implemented for result type {resultObject.GetType()}");
-                }
-            }
-            else
-            {
-                if (contextType == typeof(Created) || contextType == typeof(Accepted))
-                {
-                    object? locationProp = contextType.GetProperty("Location")?.GetValue(resultObject);
+            case ForbidHttpResult:
+                request.ResultKind = CachedResultKind.Forbidden;
+                break;
 
-                    if (locationProp is not null && locationProp is string lp)
-                    {
-                        request.Location = lp;
-                    }
-                }
+            case Conflict:
+                request.ResultKind = CachedResultKind.Conflict;
+                break;
 
-                request.BodyType = resultType.AssemblyQualifiedName;
-                request.Body = JsonSerializer.SerializeToUtf8Bytes(resultObject, _serializerOptions);
-            }
+            case NoContent:
+                request.ResultKind = CachedResultKind.NoContent;
+                break;
+
+            case Ok<T> okOfT:
+                request.ResultKind = CachedResultKind.OkOfT;
+                SetBody(request, CachedBodyKind.TValue, okOfT.Value);
+                break;
+
+            case CreatedAtRoute<T> createdAtRouteOfT:
+                request.ResultKind = CachedResultKind.CreatedAtRouteOfT;
+                SetBody(request, CachedBodyKind.TValue, createdAtRouteOfT.Value);
+                request.ResultRouteName = createdAtRouteOfT.RouteName;
+                request.ResultRouteValues = createdAtRouteOfT.RouteValues?.ToDictionary(r => r.Key, r => r.Value?.ToString());
+                break;
+
+            case AcceptedAtRoute<T> acceptedAtRouteOfT:
+                request.ResultKind = CachedResultKind.AcceptedAtRouteOfT;
+                SetBody(request, CachedBodyKind.TValue, acceptedAtRouteOfT.Value);
+                request.ResultRouteName = acceptedAtRouteOfT.RouteName;
+                request.ResultRouteValues = acceptedAtRouteOfT.RouteValues?.ToDictionary(r => r.Key, r => r.Value?.ToString());
+                break;
+
+            case BadRequest<ProblemDetails> badRequestOfProblemDetails:
+                request.ResultKind = CachedResultKind.BadRequestOfProblemDetails;
+                SetBody(request, CachedBodyKind.ProblemDetailsValue, badRequestOfProblemDetails.Value);
+                break;
+
+            case BadRequest<string> badRequestOfString:
+                request.ResultKind = CachedResultKind.BadRequestOfString;
+                SetBody(request, CachedBodyKind.StringValue, badRequestOfString.Value);
+                break;
+
+            case StatusCodeHttpResult statusCodeResult:
+                request.ResultKind = CachedResultKind.StatusCodeOnlyMinimalApi;
+                request.StatusCode = statusCodeResult.StatusCode;
+                break;
+
+            default:
+                throw new IdempotencyException($"Idempotency is not implemented for result type {executedContext.GetType()}");
         }
 
         bool requestUpdatedSuccessfully = await SetResponseInCacheAsync(cacheKey, request, ctx.HttpContext.RequestAborted);
@@ -443,14 +402,10 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
         }
     }
 
-    private string? GetBodyTypeName<TResult>(IValueHttpResult<TResult> result) where TResult : class
+    private void SetBody(ApiRequest request, CachedBodyKind bodyKind, object? value)
     {
-        return result.Value?.GetType().AssemblyQualifiedName;
-    }
-
-    private byte[]? GetSerializedBody<TResult>(IValueHttpResult<TResult> result) where TResult : class
-    {
-        return JsonSerializer.SerializeToUtf8Bytes(result.Value, _serializerOptions);
+        request.BodyKind = bodyKind;
+        request.Body = JsonSerializer.SerializeToUtf8Bytes(value, _serializerOptions);
     }
 
     private async Task<bool> SetResponseInCacheAsync(string cacheKey, ApiRequest apiRequest, CancellationToken cancellationToken)
@@ -497,31 +452,21 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
             : string.Empty;
     }
 
-    private object? GetBodyObject(ApiRequest request)
+    private TResult? GetBodyObject<TResult>(ApiRequest request) where TResult : class
     {
-        if (request.BodyType == null)
+        if (request.Body is null)
         {
-            throw new IdempotencyException("Body type not found");
+            return null;
         }
-
-        Type? bodyType = Type.GetType(request.BodyType);
-
-        if (bodyType == null)
-        {
-            throw new IdempotencyException($"Type for {request.BodyType} is not found");
-        }
-
-        object? bodyObject = null;
 
         try
         {
-            bodyObject = JsonSerializer.Deserialize(request.Body, bodyType, _serializerOptions);
+            return JsonSerializer.Deserialize<TResult>(request.Body, _serializerOptions);
         }
         catch (Exception ex)
         {
             _log.LogError(ex, "Error deserializing body object");
+            throw new IdempotencyException($"Error deserializing cached body as {typeof(TResult)}", ex);
         }
-
-        return bodyObject;
     }
 }

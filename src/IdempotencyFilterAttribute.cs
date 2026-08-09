@@ -121,10 +121,12 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
         {
             if (_options.CacheRequestTimeoutMs > 0)
             {
-                CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
-                cts.CancelAfter(_options.CacheRequestTimeoutMs);
+                using (CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted))
+                {
+                    cts.CancelAfter(_options.CacheRequestTimeoutMs);
 
-                cachedApiRequest = await _distributedCache.GetStringAsync(cacheKey, cts.Token);
+                    cachedApiRequest = await _distributedCache.GetStringAsync(cacheKey, cts.Token);
+                }
             }
             else
             {
@@ -167,9 +169,14 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
 
             DateTime startSetDt = DateTime.UtcNow;
 
+            DistributedCacheEntryOptions options = new DistributedCacheEntryOptions {
+                AbsoluteExpiration = DateTimeOffset.UtcNow.AddDays(_options.CacheAbsoluteExpirationHrs)
+            };
+
             try
             {
-                await _distributedCache.SetStringAsync(cacheKey, serializedRequest, new DistributedCacheEntryOptions { AbsoluteExpiration = DateTimeOffset.UtcNow.AddDays(1) });
+                await _distributedCache
+                    .SetStringAsync(cacheKey, serializedRequest, options);
             }
             catch (Exception ex)
             {

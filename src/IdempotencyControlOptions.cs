@@ -84,6 +84,14 @@ public class IdempotencyControlOptions
     /// ответа для такого типа завершится ошибкой <see cref="IdempotencyException"/>:
     /// <code>options.BodyTypeRegistry.Add&lt;MyResponseDto&gt;();</code>
     /// </para>
+    /// <para>
+    /// Если типов много (например, все DTO вашего API), необязательно перечислять их по одному —
+    /// задайте резолвер, который будет искать тип среди сборок вашего приложения:
+    /// <code>
+    /// options.BodyTypeRegistry.SetResolver(
+    ///     IdempotencyBodyTypeRegistry.CreateAssemblyResolver(typeof(MyResponseDto).Assembly));
+    /// </code>
+    /// </para>
     /// </summary>
     public IdempotencyBodyTypeRegistry BodyTypeRegistry { get; } = new IdempotencyBodyTypeRegistry();
 }

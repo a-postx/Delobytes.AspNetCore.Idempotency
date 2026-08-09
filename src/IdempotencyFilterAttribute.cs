@@ -482,7 +482,9 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
         {
             throw new IdempotencyException(
                 $"Type '{request.BodyTypeKey}' is not registered in IdempotencyControlOptions.BodyTypeRegistry. " +
-                "Register it explicitly at startup via options.BodyTypeRegistry.Add<T>() to allow replaying cached responses of this type.");
+                "Register it explicitly at startup via options.BodyTypeRegistry.Add<T>(), or configure " +
+                "options.BodyTypeRegistry.SetResolver(...) to resolve it dynamically, to allow replaying " +
+                "cached responses of this type.");
         }
 
         object? bodyObject = JsonSerializer.Deserialize(request.Body, bodyType, _serializerOptions);

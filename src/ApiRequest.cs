@@ -70,4 +70,8 @@ public class ApiRequest
     /// Значение заголовка Location в случае создания объекта (Created) или задачи создания объекта (Accepted).
     /// </summary>
     public string? Location { get; set; }
+    /// <summary>
+    /// Состояние идемпотентного запроса.
+    /// </summary>
+    public IdempotencyRequestStatus Status { get; set; } = IdempotencyRequestStatus.Unknown;
 }

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net.Http;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -61,59 +62,68 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
     /// <returns></returns>
     public async Task OnResourceExecutionAsync(ResourceExecutingContext context, ResourceExecutionDelegate next)
     {
-        if (_options.Enabled)
+        if (!_options.Enabled)
         {
-            string idempotencyKey = GetIdempotencyKeyHeaderValue(context.HttpContext);
+            await next.Invoke();
+            return;
+        }
 
-            if (string.IsNullOrEmpty(idempotencyKey))
+        string idempotencyKey = context.HttpContext.Request.Headers
+            .TryGetValue(_options.IdempotencyHeader, out StringValues idempotencyKeyValue) ? idempotencyKeyValue.ToString() : string.Empty;
+
+        if (string.IsNullOrEmpty(idempotencyKey))
+        {
+            if (_options.HeaderRequired)
             {
-                if (_options.HeaderRequired)
-                {
-                    context.Result = new BadRequestObjectResult($"Запрос не содержит заголовка {_options.IdempotencyHeader} или значение в нём неверно.");
-                    return;
-                }
-                else
-                {
-                    await next.Invoke();
-                }
+                context.Result = new BadRequestObjectResult($"Запрос не содержит заголовка {_options.IdempotencyHeader} или значение в нём неверно.");
+                return;
             }
             else
             {
-                string cacheKey = $"{_options.CacheKeysPrefix}:{idempotencyKey}";
-
-                string method = context.HttpContext.Request.Method;
-                string? path = context.HttpContext.Request.Path.HasValue ? context.HttpContext.Request.Path.Value : null;
-                string? query = context.HttpContext.Request.QueryString.HasValue ? context.HttpContext.Request.QueryString.ToUriComponent() : null;
-
-                (bool requestCreated, ApiRequest? request) = await GetOrCreateRequestAsync(context.HttpContext, idempotencyKey, cacheKey, method, path, query);
-
-                if (!requestCreated)
-                {
-                    if (request != null)
-                    {
-                        UpdateContextWithCachedResult(context, request, method, path, query);
-                        return;
-                    }
-                    else
-                    {
-                        if (!_options.Optional)
-                        {
-                            throw new IdempotencyException("Error getting cached request");
-                        }
-                    }
-                }
-
-                ResourceExecutedContext executedContext = await next.Invoke();
-
-                if (requestCreated && request != null)
-                {
-                    await UpdateRequestWithResponseDataAsync(executedContext, request, cacheKey);
-                }
+                await next.Invoke();
             }
         }
         else
         {
-            await next.Invoke();
+            string cacheKey = $"{_options.CacheKeysPrefix}:{idempotencyKey}";
+
+            string method = context.HttpContext.Request.Method;
+            string? path = context.HttpContext.Request.Path.HasValue ? context.HttpContext.Request.Path.Value : null;
+            string? query = context.HttpContext.Request.QueryString.HasValue ? context.HttpContext.Request.QueryString.ToUriComponent() : null;
+            
+            (bool requestCreated, ApiRequest? request) = await GetOrCreateRequestAsync(context.HttpContext, idempotencyKey, cacheKey, method, path, query);
+
+            if (!requestCreated)
+            {
+                if (request != null)
+                {
+                    if (request.Status == IdempotencyRequestStatus.InProgress)
+                    {
+                        context.HttpContext.Response.StatusCode = 425;
+                        context.Result = new StatusCodeResult(425);
+                        return;
+                    }
+                    else
+                    {
+                        UpdateContextWithCachedResult(context, request, method, path, query);
+                        return;
+                    }
+                }
+                else
+                {
+                    if (!_options.Optional)
+                    {
+                        throw new IdempotencyException("Error getting cached request");
+                    }
+                }
+            }
+
+            ResourceExecutedContext executedContext = await next.Invoke();
+            
+            if (requestCreated && request != null)
+            {
+                await UpdateRequestWithResponseDataAsync(executedContext, request, cacheKey);
+            }
         }
     }
 
@@ -168,6 +178,7 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
         else
         {
             ApiRequest apiRequest = new ApiRequest(idempotencyKey, method);
+            apiRequest.Status = IdempotencyRequestStatus.InProgress;
             apiRequest.Path = path;
             apiRequest.Query = query;
 
@@ -332,6 +343,8 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
             }
         }
 
+        request.Status = IdempotencyRequestStatus.Completed;
+
         bool requestUpdatedSuccessfully = await SetResponseInCacheAsync(executedContext, cacheKey, request);
 
         if (!requestUpdatedSuccessfully)
@@ -376,12 +389,6 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
         }
 
         return true;
-    }
-
-    private string GetIdempotencyKeyHeaderValue(HttpContext httpContext)
-    {
-        return httpContext.Request.Headers
-            .TryGetValue(_options.IdempotencyHeader, out StringValues idempotencyKeyValue) ? idempotencyKeyValue.ToString() : string.Empty;
     }
 
     private void SetBody(ApiRequest request, object? value)

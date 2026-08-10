@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -83,6 +84,7 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
         if (cachedRequest is null)
         {
             ApiRequest newRequest = new ApiRequest(idempotencyKey, method);
+            newRequest.Status = IdempotencyRequestStatus.InProgress;
             newRequest.Path = path;
             newRequest.Query = query;
 
@@ -101,6 +103,11 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
         }
         else
         {
+            if (cachedRequest.Status == IdempotencyRequestStatus.InProgress)
+            {
+                return TypedResults.StatusCode(425);
+            }
+
             if (cachedRequest.ResultKind == CachedResultKind.Unknown) //выпало исключение?
             {
                 _log.LogInformation("There is no cached response data for the request");
@@ -393,6 +400,8 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
             default:
                 throw new IdempotencyException($"Idempotency is not implemented for result type {executedContext.GetType()}");
         }
+
+        request.Status = IdempotencyRequestStatus.Completed;
 
         bool requestUpdatedSuccessfully = await SetResponseInCacheAsync(cacheKey, request, ctx.HttpContext.RequestAborted);
 

@@ -47,6 +47,12 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
     private readonly MvcOptions _mvcOptions;
     private readonly JsonSerializerOptions _serializerOptions;
 
+    private static readonly Lazy<SystemTextJsonOutputFormatter> _systemTextJsonFormatter =
+        new Lazy<SystemTextJsonOutputFormatter>(InitializeSystemTextJsonOutputFormatter);
+
+    private static readonly Lazy<NewtonsoftJsonOutputFormatter> _newtonsoftJsonFormatter =
+        new Lazy<NewtonsoftJsonOutputFormatter>(InitializeNewtonsoftJsonOutputFormatter);
+
     /// <summary>
     /// Проверяет идемпотентность и возвращает результат запроса из кеша если он уже был выполнен.
     /// </summary>
@@ -416,7 +422,7 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
         switch (formatterType)
         {
             case OutputFormatterType.Newtonsoft:
-                NewtonsoftJsonOutputFormatter newtonsoftFormatter = GetNewtonsoftJsonOutputFormatter();
+                NewtonsoftJsonOutputFormatter newtonsoftFormatter = _newtonsoftJsonFormatter.Value;
 
                 if (!newtonsoftFormatter.SupportedMediaTypes.Any(e => e == mediaType))
                 {
@@ -426,7 +432,7 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
                 return newtonsoftFormatter;
 
             case OutputFormatterType.SystemText:
-                SystemTextJsonOutputFormatter systemtextFormatter = GetSystemTextJsonOutputFormatter();
+                SystemTextJsonOutputFormatter systemtextFormatter = _systemTextJsonFormatter.Value;
 
                 if (!systemtextFormatter.SupportedMediaTypes.Any(e => e == mediaType))
                 {
@@ -440,20 +446,22 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
         }
     }
 
-    private static SystemTextJsonOutputFormatter GetSystemTextJsonOutputFormatter()
+    private static SystemTextJsonOutputFormatter InitializeSystemTextJsonOutputFormatter()
     {
         IServiceCollection services = new ServiceCollection()
             .AddLogging()
             .AddMvc()
             .Services;
-        ServiceProvider serviceProvider = services.BuildServiceProvider();
-        MvcOptions mvcOptions = serviceProvider.GetRequiredService<IOptions<MvcOptions>>().Value;
-        return mvcOptions.OutputFormatters
-            .OfType<SystemTextJsonOutputFormatter>()
-            .Last();
+        using (ServiceProvider serviceProvider = services.BuildServiceProvider())
+        {
+            MvcOptions mvcOptions = serviceProvider.GetRequiredService<IOptions<MvcOptions>>().Value;
+            return mvcOptions.OutputFormatters
+                .OfType<SystemTextJsonOutputFormatter>()
+                .Last();
+        }
     }
 
-    private static NewtonsoftJsonOutputFormatter GetNewtonsoftJsonOutputFormatter()
+    private static NewtonsoftJsonOutputFormatter InitializeNewtonsoftJsonOutputFormatter()
     {
         IServiceCollection services = new ServiceCollection()
             .AddLogging()
@@ -464,11 +472,13 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
                 options.SerializerSettings.DateParseHandling = Newtonsoft.Json.DateParseHandling.DateTimeOffset;
             })
             .Services;
-        ServiceProvider serviceProvider = services.BuildServiceProvider();
-        MvcOptions mvcOptions = serviceProvider.GetRequiredService<IOptions<MvcOptions>>().Value;
-        return mvcOptions.OutputFormatters
-            .OfType<NewtonsoftJsonOutputFormatter>()
-            .Last();
+        using (ServiceProvider serviceProvider = services.BuildServiceProvider())
+        {
+            MvcOptions mvcOptions = serviceProvider.GetRequiredService<IOptions<MvcOptions>>().Value;
+            return mvcOptions.OutputFormatters
+                .OfType<NewtonsoftJsonOutputFormatter>()
+                .Last();
+        }
     }
 
     private (object? body, Type bodyType) GetBodyObject(ApiRequest request)

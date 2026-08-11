@@ -97,16 +97,40 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
             {
                 if (request != null)
                 {
-                    if (request.Status == IdempotencyRequestStatus.InProgress)
+                    switch (request.Status)
                     {
-                        context.HttpContext.Response.StatusCode = 425;
-                        context.Result = new StatusCodeResult(425);
-                        return;
-                    }
-                    else
-                    {
-                        UpdateContextWithCachedResult(context, request, method, path, query);
-                        return;
+                        case IdempotencyRequestStatus.InProgress:
+                            context.HttpContext.Response.StatusCode = 425;
+                            context.Result = new StatusCodeResult(425);
+                            return;
+
+                        case IdempotencyRequestStatus.Completed:
+                            if (request.ResultKind == CachedResultKind.Unknown)
+                            {
+                                _log.LogInformation("There is no cached response data for the request");
+                                context.HttpContext.Response.StatusCode = 500;
+                                context.Result = new StatusCodeResult(500);
+                                return;
+                            }
+
+                            if (method != request.Method || path != request.Path || query != request.Query)
+                            {
+                                _log.LogInformation("Idempotency cache already contains {ApiRequestID} and its properties are different from the current request", request.ApiRequestID);
+                                context.HttpContext.Response.StatusCode = 409;
+                                context.Result = new StatusCodeResult(409);
+                                return;
+                            }
+
+                            UpdateContextWithCachedResult(context, request, method, path, query);
+                            return;
+
+                        case IdempotencyRequestStatus.Unknown:
+                            context.HttpContext.Response.StatusCode = 500;
+                            context.Result = new StatusCodeResult(500);
+                            return;
+
+                        default:
+                            throw new IdempotencyException($"Unexpected request status: {request.Status}");
                     }
                 }
                 else

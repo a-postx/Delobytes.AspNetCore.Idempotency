@@ -108,19 +108,32 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
                 return TypedResults.StatusCode(425);
             }
 
-            if (cachedRequest.ResultKind == CachedResultKind.Unknown) //выпало исключение?
+            switch (cachedRequest.Status)
             {
-                _log.LogInformation("There is no cached response data for the request");
-                return TypedResults.StatusCode(500);
-            }
+                case IdempotencyRequestStatus.InProgress:
+                    return TypedResults.StatusCode(425);
 
-            if (method != cachedRequest.Method || path != cachedRequest.Path || query != cachedRequest.Query)
-            {
-                _log.LogInformation("Idempotency cache already contains {ApiRequestID} and its properties are different from the current request", cachedRequest.ApiRequestID);
-                return TypedResults.Conflict($"В кеше исполнения уже есть запрос с идентификатором идемпотентности {cachedRequest.ApiRequestID} и его параметры отличны от текущего запроса.");
-            }
+                case IdempotencyRequestStatus.Completed:
+                    if (cachedRequest.ResultKind == CachedResultKind.Unknown)
+                    {
+                        _log.LogInformation("There is no cached response data for the request");
+                        return TypedResults.StatusCode(500);
+                    }
 
-            return GetCachedResult(context, cachedRequest);
+                    if (method != cachedRequest.Method || path != cachedRequest.Path || query != cachedRequest.Query)
+                    {
+                        _log.LogInformation("Idempotency cache already contains {ApiRequestID} and its properties are different from the current request", cachedRequest.ApiRequestID);
+                        return TypedResults.Conflict($"В кеше исполнения уже есть запрос с идентификатором идемпотентности {cachedRequest.ApiRequestID} и его параметры отличны от текущего запроса.");
+                    }
+
+                    return GetCachedResult(context, cachedRequest);
+
+                case IdempotencyRequestStatus.Unknown: //выпало исключение?
+                    return TypedResults.StatusCode(500);
+
+                default:
+                    throw new IdempotencyException($"Unexpected request status: {cachedRequest.Status}");
+            }
         }
     }
 

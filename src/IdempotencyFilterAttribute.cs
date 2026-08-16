@@ -153,7 +153,7 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
 
     private async Task<(bool created, ApiRequest? request)> GetOrCreateRequestAsync(HttpContext ctx, string idempotencyKey, string cacheKey, string method, string? path, string? query)
     {
-        string? cachedApiRequest;
+        byte[]? cachedApiRequest;
 
         DateTime startGetDt = DateTime.UtcNow;
 
@@ -165,12 +165,12 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
                 {
                     cts.CancelAfter(_options.CacheRequestTimeoutMs);
 
-                    cachedApiRequest = await _distributedCache.GetStringAsync(cacheKey, cts.Token);
+                    cachedApiRequest = await _distributedCache.GetAsync(cacheKey, cts.Token);
                 }
             }
             else
             {
-                cachedApiRequest = await _distributedCache.GetStringAsync(cacheKey);
+                cachedApiRequest = await _distributedCache.GetAsync(cacheKey);
             }
         }
         catch (Exception ex)
@@ -206,7 +206,7 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
             apiRequest.Path = path;
             apiRequest.Query = query;
 
-            string serializedRequest = JsonSerializer.Serialize(apiRequest, _serializerOptions);
+            byte[] serializedRequest = JsonSerializer.SerializeToUtf8Bytes(apiRequest, _serializerOptions);
 
             DateTime startSetDt = DateTime.UtcNow;
 
@@ -216,8 +216,7 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
 
             try
             {
-                await _distributedCache
-                    .SetStringAsync(cacheKey, serializedRequest, options);
+                await _distributedCache.SetAsync(cacheKey, serializedRequest, options);
             }
             catch (Exception ex)
             {
@@ -379,7 +378,7 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
 
     private async Task<bool> SetResponseInCacheAsync(ResourceExecutedContext context, string key, ApiRequest apiRequest)
     {
-        string serializedRequest = JsonSerializer.Serialize(apiRequest, _serializerOptions);
+        byte[] serializedRequest = JsonSerializer.SerializeToUtf8Bytes(apiRequest, _serializerOptions);
 
         DateTime startSetDt = DateTime.UtcNow;
 
@@ -394,11 +393,11 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
                 CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(context.HttpContext.RequestAborted);
                 cts.CancelAfter(_options.CacheRequestTimeoutMs);
 
-                await _distributedCache.SetStringAsync(key, serializedRequest, cacheOpts, cts.Token);
+                await _distributedCache.SetAsync(key, serializedRequest, cacheOpts, cts.Token);
             }
             else
             {
-                await _distributedCache.SetStringAsync(key, serializedRequest, cacheOpts);
+                await _distributedCache.SetAsync(key, serializedRequest, cacheOpts);
             }
         }
         catch (Exception ex)

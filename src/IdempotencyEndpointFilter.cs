@@ -139,7 +139,7 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
 
     private async Task<ApiRequest?> GetRequestFromCacheAsync(string cacheKey, CancellationToken cancellationToken)
     {
-        string? cachedRequest;
+        byte[]? cachedRequest;
 
         DateTime startGetDt = DateTime.UtcNow;
 
@@ -151,12 +151,12 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
                 {
                     cts.CancelAfter(_options.CacheRequestTimeoutMs);
 
-                    cachedRequest = await _distributedCache.GetStringAsync(cacheKey, cts.Token);
+                    cachedRequest = await _distributedCache.GetAsync(cacheKey, cts.Token);
                 }
             }
             else
             {
-                cachedRequest = await _distributedCache.GetStringAsync(cacheKey, cancellationToken);
+                cachedRequest = await _distributedCache.GetAsync(cacheKey, cancellationToken);
             }
         }
         catch (Exception ex)
@@ -192,7 +192,7 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
 
     private async Task<bool> CacheRequestAsync(string cacheKey, ApiRequest apiRequest, CancellationToken cancellationToken)
     {
-        string serializedRequest = JsonSerializer.Serialize(apiRequest, _serializerOptions);
+        byte[] serializedRequest = JsonSerializer.SerializeToUtf8Bytes(apiRequest, _serializerOptions);
 
         DateTime startSetDt = DateTime.UtcNow;
 
@@ -204,12 +204,12 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
                 {
                     cts.CancelAfter(_options.CacheRequestTimeoutMs);
 
-                    await _distributedCache.SetStringAsync(cacheKey, serializedRequest, _cacheEntryOptions, cts.Token);
+                    await _distributedCache.SetAsync(cacheKey, serializedRequest, _cacheEntryOptions, cts.Token);
                 }
             }
             else
             {
-                await _distributedCache.SetStringAsync(cacheKey, serializedRequest, _cacheEntryOptions, cancellationToken);
+                await _distributedCache.SetAsync(cacheKey, serializedRequest, _cacheEntryOptions, cancellationToken);
             }
         }
         catch (Exception ex)

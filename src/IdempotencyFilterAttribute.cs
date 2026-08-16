@@ -1,15 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Net.Http;
 using System.Text.Json;
-using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.AspNetCore.Mvc.Formatters;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -19,7 +15,7 @@ using Microsoft.Net.Http.Headers;
 namespace Delobytes.AspNetCore.Idempotency;
 
 /// <summary>
-/// Фильтр идемпотентности: сохраняет результаты запроса с ключом идемпотентности в кеш,
+/// Фильтр идемпотентности: сохраняет результаты запросов с ключом идемпотентности в кэш,
 /// чтобы вернуть тот же ответ в случае запроса-дубликата.
 /// Реализация по примеру https://stripe.com/docs/api/idempotent_requests
 /// </summary>
@@ -31,20 +27,20 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
     /// </summary>
     public IdempotencyFilterAttribute(ILogger<IdempotencyFilterAttribute> logger,
         IOptions<IdempotencyControlOptions> options,
-        IDistributedCache distributedCache,
+        RequestCachingService idempotencyService,
         IOptions<MvcOptions> mvcOptions,
         JsonSerializerOptions serializerOptions)
     {
         _log = logger ?? throw new ArgumentNullException(nameof(logger));
         _options = options.Value;
-        _distributedCache = distributedCache ?? throw new ArgumentNullException(nameof(distributedCache));
+        _idempotencyService = idempotencyService ?? throw new ArgumentNullException(nameof(idempotencyService));
         _mvcOptions = mvcOptions.Value;
         _serializerOptions = serializerOptions ?? throw new ArgumentNullException(nameof(serializerOptions));
     }
 
     private readonly ILogger<IdempotencyFilterAttribute> _log;
     private readonly IdempotencyControlOptions _options;
-    private readonly IDistributedCache _distributedCache;
+    private readonly RequestCachingService _idempotencyService;
     private readonly MvcOptions _mvcOptions;
     private readonly JsonSerializerOptions _serializerOptions;
 
@@ -55,11 +51,8 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
         new Lazy<NewtonsoftJsonOutputFormatter>(InitializeNewtonsoftJsonOutputFormatter);
 
     /// <summary>
-    /// Проверяет идемпотентность и возвращает результат запроса из кеша если он уже был выполнен.
+    /// Проверяет идемпотентность и возвращает результат запроса из кэша если он уже был выполнен.
     /// </summary>
-    /// <param name="context"></param>
-    /// <param name="next"></param>
-    /// <returns></returns>
     public async Task OnResourceExecutionAsync(ResourceExecutingContext context, ResourceExecutionDelegate next)
     {
         if (!_options.Enabled)
@@ -90,8 +83,8 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
             string method = context.HttpContext.Request.Method;
             string? path = context.HttpContext.Request.Path.HasValue ? context.HttpContext.Request.Path.Value : null;
             string? query = context.HttpContext.Request.QueryString.HasValue ? context.HttpContext.Request.QueryString.ToUriComponent() : null;
-            
-            (bool requestCreated, ApiRequest? request) = await GetOrCreateRequestAsync(context.HttpContext, idempotencyKey, cacheKey, method, path, query);
+
+            (bool requestCreated, ApiRequest? request) = await _idempotencyService.GetOrCreateRequestAsync(context.HttpContext, idempotencyKey, cacheKey, method, path, query);
 
             if (!requestCreated)
             {
@@ -143,93 +136,11 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
             }
 
             ResourceExecutedContext executedContext = await next.Invoke();
-            
+
             if (requestCreated && request != null)
             {
                 await UpdateRequestWithResponseDataAsync(executedContext, request, cacheKey);
             }
-        }
-    }
-
-    private async Task<(bool created, ApiRequest? request)> GetOrCreateRequestAsync(HttpContext ctx, string idempotencyKey, string cacheKey, string method, string? path, string? query)
-    {
-        byte[]? cachedApiRequest;
-
-        DateTime startGetDt = DateTime.UtcNow;
-
-        try
-        {
-            if (_options.CacheRequestTimeoutMs > 0)
-            {
-                using (CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted))
-                {
-                    cts.CancelAfter(_options.CacheRequestTimeoutMs);
-
-                    cachedApiRequest = await _distributedCache.GetAsync(cacheKey, cts.Token);
-                }
-            }
-            else
-            {
-                cachedApiRequest = await _distributedCache.GetAsync(cacheKey);
-            }
-        }
-        catch (Exception ex)
-        {
-            _log.LogError(ex, "Error getting cached value for key {CacheKey}", cacheKey);
-            return (false, null);
-        }
-        finally
-        {
-            TimeSpan processingTime = DateTime.UtcNow - startGetDt;
-            _log.LogInformation("cache.request.idempotency.get.msec {CacheRequestIdempotencyGetMsec}", (int)processingTime.TotalMilliseconds);
-        }
-
-        if (cachedApiRequest is not null && cachedApiRequest.Length > 0)
-        {
-            ApiRequest? requestFromCache = null;
-
-            try
-            {
-                requestFromCache = JsonSerializer.Deserialize<ApiRequest>(cachedApiRequest, _serializerOptions);
-            }
-            catch (JsonException ex)
-            {
-                _log.LogError(ex, "Error deserializing cached value for key {CacheKey}", cacheKey);
-            }
-
-            return (false, requestFromCache);
-        }
-        else
-        {
-            ApiRequest apiRequest = new ApiRequest(idempotencyKey, method);
-            apiRequest.Status = IdempotencyRequestStatus.InProgress;
-            apiRequest.Path = path;
-            apiRequest.Query = query;
-
-            byte[] serializedRequest = JsonSerializer.SerializeToUtf8Bytes(apiRequest, _serializerOptions);
-
-            DateTime startSetDt = DateTime.UtcNow;
-
-            DistributedCacheEntryOptions options = new DistributedCacheEntryOptions {
-                AbsoluteExpiration = DateTimeOffset.UtcNow.AddDays(_options.CacheAbsoluteExpirationHrs)
-            };
-
-            try
-            {
-                await _distributedCache.SetAsync(cacheKey, serializedRequest, options);
-            }
-            catch (Exception ex)
-            {
-                _log.LogError(ex, "Error adding cached value for key {CacheKey}", cacheKey);
-                return (false, null);
-            }
-            finally
-            {
-                TimeSpan processingTime = DateTime.UtcNow - startSetDt;
-                _log.LogInformation("cache.request.idempotency.create.msec {CacheRequestIdempotencyCreateMsec}", (int)processingTime.TotalMilliseconds);
-            }
-
-            return (true, apiRequest);
         }
     }
 
@@ -238,7 +149,7 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
         if (method != request.Method || path != request.Path || query != request.Query)
         {
             _log.LogInformation("Idempotency cache already contains {ApiRequestID} and its properties are different from the current request", request.ApiRequestID);
-            context.Result = new ConflictObjectResult($"В кеше исполнения уже есть запрос с идентификатором идемпотентности {request.ApiRequestID} и его параметры отличны от текущего запроса.");
+            context.Result = new ConflictObjectResult($"В кеше исполнения уже есть запрос с идентификатором {request.ApiRequestID} и его параметры отличаются от текущего запроса.");
             return;
         }
 
@@ -368,50 +279,12 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
 
         request.Status = IdempotencyRequestStatus.Completed;
 
-        bool requestUpdatedSuccessfully = await SetResponseInCacheAsync(executedContext, cacheKey, request);
+        bool requestUpdatedSuccessfully = await _idempotencyService.SetResponseInCacheAsync(cacheKey, request, executedContext.HttpContext.RequestAborted);
 
         if (!requestUpdatedSuccessfully)
         {
             throw new IdempotencyException("Failed to set request response.");
         }
-    }
-
-    private async Task<bool> SetResponseInCacheAsync(ResourceExecutedContext context, string key, ApiRequest apiRequest)
-    {
-        byte[] serializedRequest = JsonSerializer.SerializeToUtf8Bytes(apiRequest, _serializerOptions);
-
-        DateTime startSetDt = DateTime.UtcNow;
-
-        try
-        {
-            DistributedCacheEntryOptions cacheOpts = new DistributedCacheEntryOptions {
-                AbsoluteExpiration = DateTimeOffset.UtcNow.AddHours(_options.CacheAbsoluteExpirationHrs)
-            };
-
-            if (_options.CacheRequestTimeoutMs > 0)
-            {
-                CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(context.HttpContext.RequestAborted);
-                cts.CancelAfter(_options.CacheRequestTimeoutMs);
-
-                await _distributedCache.SetAsync(key, serializedRequest, cacheOpts, cts.Token);
-            }
-            else
-            {
-                await _distributedCache.SetAsync(key, serializedRequest, cacheOpts);
-            }
-        }
-        catch (Exception ex)
-        {
-            _log.LogError(ex, "Error updating cached value for key {CacheKey}", key);
-            return false;
-        }
-        finally
-        {
-            TimeSpan processingTime = DateTime.UtcNow - startSetDt;
-            _log.LogInformation("cache.request.idempotency.update.msec {CacheRequestIdempotencyUpdateMsec}", (int)processingTime.TotalMilliseconds);
-        }
-
-        return true;
     }
 
     private void SetBody(ApiRequest request, object? value)
@@ -482,6 +355,7 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
             .AddLogging()
             .AddMvc()
             .Services;
+
         using (ServiceProvider serviceProvider = services.BuildServiceProvider())
         {
             MvcOptions mvcOptions = serviceProvider.GetRequiredService<IOptions<MvcOptions>>().Value;
@@ -502,6 +376,7 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
                 options.SerializerSettings.DateParseHandling = Newtonsoft.Json.DateParseHandling.DateTimeOffset;
             })
             .Services;
+
         using (ServiceProvider serviceProvider = services.BuildServiceProvider())
         {
             MvcOptions mvcOptions = serviceProvider.GetRequiredService<IOptions<MvcOptions>>().Value;
@@ -511,11 +386,11 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
         }
     }
 
-    private (object? body, Type bodyType) GetBodyObject(ApiRequest request)
+    private (object? bodyObject, Type bodyType) GetBodyObject(ApiRequest request)
     {
-        if (request.BodyTypeKey == null)
+        if (request.Body is null)
         {
-            throw new IdempotencyException("Body type not found");
+            return (null, typeof(object));
         }
 
         if (!_options.BodyTypeRegistry.TryResolve(request.BodyTypeKey, out Type? bodyType) || bodyType is null)

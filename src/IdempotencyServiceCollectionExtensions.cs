@@ -49,6 +49,7 @@ public static class IdempotencyServiceCollectionExtensions
         }
 
         services.AddScoped<IdempotencyFilterAttribute>();
+        services.AddScoped<RequestCachingService>();
 
         return services;
     }

@@ -1,14 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Net;
 using System.Text.Json;
-using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Primitives;
@@ -16,7 +13,7 @@ using Microsoft.Extensions.Primitives;
 namespace Delobytes.AspNetCore.Idempotency;
 
 /// <summary>
-/// Фильтр идемпотентности: сохраняет результаты запроса с ключом идемпотентности в кеш,
+/// Фильтр идемпотентности: сохраняет результаты запросов с ключом идемпотентности в кэш,
 /// чтобы вернуть тот же ответ в случае запроса-дубликата.
 /// Реализация по примеру https://stripe.com/docs/api/idempotent_requests
 /// </summary>
@@ -27,31 +24,23 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
     /// </summary>
     public IdempotencyEndpointFilter(ILogger<IdempotencyEndpointFilter<T>> logger,
         IOptions<IdempotencyControlOptions> options,
-        IDistributedCache distributedCache,
+        RequestCachingService idempotencyService,
         JsonSerializerOptions serializerOptions)
     {
         _log = logger ?? throw new ArgumentNullException(nameof(logger));
         _options = options.Value;
-        _distributedCache = distributedCache ?? throw new ArgumentNullException(nameof(distributedCache));
+        _idempotencyService = idempotencyService ?? throw new ArgumentNullException(nameof(idempotencyService));
         _serializerOptions = serializerOptions ?? throw new ArgumentNullException(nameof(serializerOptions));
-        _cacheEntryOptions = new DistributedCacheEntryOptions
-        {
-            AbsoluteExpiration = DateTimeOffset.UtcNow.AddHours(_options.CacheAbsoluteExpirationHrs)
-        };
     }
 
     private readonly ILogger<IdempotencyEndpointFilter<T>> _log;
     private readonly IdempotencyControlOptions _options;
-    private readonly IDistributedCache _distributedCache;
+    private readonly RequestCachingService _idempotencyService;
     private readonly JsonSerializerOptions _serializerOptions;
-    private readonly DistributedCacheEntryOptions _cacheEntryOptions;
 
     /// <summary>
-    /// Проверяет идемпотентность и возвращает результат запроса из кеша если он уже был выполнен.
+    /// Проверяет идемпотентность и возвращает результат запроса из кэша если он уже был выполнен.
     /// </summary>
-    /// <param name="context"></param>
-    /// <param name="next"></param>
-    /// <returns></returns>
     public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
     {
         if (!_options.Enabled)
@@ -79,7 +68,7 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
         string? path = context.HttpContext.Request.Path.HasValue ? context.HttpContext.Request.Path.Value : null;
         string? query = context.HttpContext.Request.QueryString.HasValue ? context.HttpContext.Request.QueryString.ToUriComponent() : null;
 
-        ApiRequest? cachedRequest = await GetRequestFromCacheAsync(cacheKey, context.HttpContext.RequestAborted);
+        ApiRequest? cachedRequest = await _idempotencyService.GetRequestFromCacheAsync(cacheKey, context.HttpContext.RequestAborted);
 
         if (cachedRequest is null)
         {
@@ -88,7 +77,7 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
             newRequest.Path = path;
             newRequest.Query = query;
 
-            bool requestCached = await CacheRequestAsync(cacheKey, newRequest, context.HttpContext.RequestAborted);
+            bool requestCached = await _idempotencyService.CacheRequestAsync(cacheKey, newRequest, context.HttpContext.RequestAborted);
 
             if (requestCached is false && !_options.Optional)
             {
@@ -123,7 +112,7 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
                     if (method != cachedRequest.Method || path != cachedRequest.Path || query != cachedRequest.Query)
                     {
                         _log.LogInformation("Idempotency cache already contains {ApiRequestID} and its properties are different from the current request", cachedRequest.ApiRequestID);
-                        return TypedResults.Conflict($"В кеше исполнения уже есть запрос с идентификатором идемпотентности {cachedRequest.ApiRequestID} и его параметры отличны от текущего запроса.");
+                        return TypedResults.Conflict($"В кеше исполнения уже есть запрос с идентификатором {cachedRequest.ApiRequestID} и его параметры отличаются от текущего запроса.");
                     }
 
                     return GetCachedResult(context, cachedRequest);
@@ -137,96 +126,7 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
         }
     }
 
-    private async Task<ApiRequest?> GetRequestFromCacheAsync(string cacheKey, CancellationToken cancellationToken)
-    {
-        byte[]? cachedRequest;
-
-        DateTime startGetDt = DateTime.UtcNow;
-
-        try
-        {
-            if (_options.CacheRequestTimeoutMs > 0)
-            {
-                using (CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
-                {
-                    cts.CancelAfter(_options.CacheRequestTimeoutMs);
-
-                    cachedRequest = await _distributedCache.GetAsync(cacheKey, cts.Token);
-                }
-            }
-            else
-            {
-                cachedRequest = await _distributedCache.GetAsync(cacheKey, cancellationToken);
-            }
-        }
-        catch (Exception ex)
-        {
-            _log.LogError(ex, "Error getting cached value for key {CacheKey}", cacheKey);
-            return null;
-        }
-        finally
-        {
-            TimeSpan processingTime = DateTime.UtcNow - startGetDt;
-            _log.LogInformation("cache.request.idempotency.get.msec {CacheRequestIdempotencyGetMsec}", (int)processingTime.TotalMilliseconds);
-        }
-
-        if (cachedRequest is null || cachedRequest.Length == 0)
-        {
-            return null;
-        }
-
-        ApiRequest? requestFromCache;
-
-        try
-        {
-            requestFromCache = JsonSerializer.Deserialize<ApiRequest>(cachedRequest, _serializerOptions);
-        }
-        catch (JsonException ex)
-        {
-            _log.LogError(ex, "Error deserializing cached request value for key {CacheKey}", cacheKey);
-            return null;
-        }
-
-        return requestFromCache;
-    }
-
-    private async Task<bool> CacheRequestAsync(string cacheKey, ApiRequest apiRequest, CancellationToken cancellationToken)
-    {
-        byte[] serializedRequest = JsonSerializer.SerializeToUtf8Bytes(apiRequest, _serializerOptions);
-
-        DateTime startSetDt = DateTime.UtcNow;
-
-        try
-        {
-            if (_options.CacheRequestTimeoutMs > 0)
-            {
-                using (CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
-                {
-                    cts.CancelAfter(_options.CacheRequestTimeoutMs);
-
-                    await _distributedCache.SetAsync(cacheKey, serializedRequest, _cacheEntryOptions, cts.Token);
-                }
-            }
-            else
-            {
-                await _distributedCache.SetAsync(cacheKey, serializedRequest, _cacheEntryOptions, cancellationToken);
-            }
-        }
-        catch (Exception ex)
-        {
-            _log.LogError(ex, "Error adding cached value for key {CacheKey}", cacheKey);
-            return false;
-        }
-        finally
-        {
-            TimeSpan processingTime = DateTime.UtcNow - startSetDt;
-            _log.LogInformation("cache.request.idempotency.create.msec {CacheRequestIdempotencyCreateMsec}", (int)processingTime.TotalMilliseconds);
-        }
-
-        return true;
-    }
-
-    private IResult GetCachedResult(EndpointFilterInvocationContext context, ApiRequest request)
+    private object? GetCachedResult(EndpointFilterInvocationContext context, ApiRequest request)
     {
         if (request.Headers != null)
         {
@@ -270,16 +170,10 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
                 return TypedResults.Problem();
 
             case CachedResultKind.BadRequest:
-                return TypedResults.BadRequest();
-
-            case CachedResultKind.Forbidden:
-                return TypedResults.Forbid();
-
-            case CachedResultKind.Conflict:
-                return TypedResults.Conflict();
-
-            case CachedResultKind.NoContent:
-                return TypedResults.NoContent();
+            {
+                string? bodyObject = GetBodyObject<string>(request);
+                return TypedResults.BadRequest(bodyObject);
+            }
 
             case CachedResultKind.OkOfT:
             {
@@ -316,11 +210,9 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
         }
     }
 
-    private async Task UpdateRequestWithResponseDataAsync(EndpointFilterInvocationContext ctx,
-        object? executedContext, ApiRequest request, string cacheKey)
+    private async Task UpdateRequestWithResponseDataAsync(EndpointFilterInvocationContext ctx, object? executedContext, ApiRequest request, string cacheKey)
     {
-        request.Headers = ctx
-            .HttpContext.Response.Headers.ToDictionary(h => h.Key, h => h.Value.ToList());
+        request.Headers = ctx.HttpContext.Response.Headers.ToDictionary(h => h.Key, h => h.Value.ToList());
 
         if (executedContext is null)
         {
@@ -416,7 +308,7 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
 
         request.Status = IdempotencyRequestStatus.Completed;
 
-        bool requestUpdatedSuccessfully = await SetResponseInCacheAsync(cacheKey, request, ctx.HttpContext.RequestAborted);
+        bool requestUpdatedSuccessfully = await _idempotencyService.SetResponseInCacheAsync(cacheKey, request, ctx.HttpContext.RequestAborted);
 
         if (!requestUpdatedSuccessfully)
         {
@@ -430,48 +322,12 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
         request.Body = JsonSerializer.SerializeToUtf8Bytes(value, _serializerOptions);
     }
 
-    private async Task<bool> SetResponseInCacheAsync(string cacheKey, ApiRequest apiRequest, CancellationToken cancellationToken)
-    {
-        string serializedRequest = JsonSerializer.Serialize(apiRequest, _serializerOptions);
-
-        DateTime startSetDt = DateTime.UtcNow;
-
-        try
-        {
-            if (_options.CacheRequestTimeoutMs > 0)
-            {
-                using (CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
-                {
-                    cts.CancelAfter(_options.CacheRequestTimeoutMs);
-
-                    await _distributedCache.SetStringAsync(cacheKey, serializedRequest, _cacheEntryOptions, cts.Token);
-                }
-            }
-            else
-            {
-                await _distributedCache.SetStringAsync(cacheKey, serializedRequest, _cacheEntryOptions, CancellationToken.None);
-            }
-        }
-        catch (Exception ex)
-        {
-            _log.LogError(ex, "Error updating cached value for key {CacheKey}", cacheKey);
-            return false;
-        }
-        finally
-        {
-            TimeSpan processingTime = DateTime.UtcNow - startSetDt;
-            _log.LogInformation("cache.request.idempotency.update.msec {CacheRequestIdempotencyUpdateMsec}", (int)processingTime.TotalMilliseconds);
-        }
-
-        return true;
-    }
-
     private string GetIdempotencyKeyHeaderValue(HttpContext httpContext)
     {
         return httpContext.Request.Headers
             .TryGetValue(_options.IdempotencyHeader, out StringValues idempotencyKeyValue)
-            ? idempotencyKeyValue.ToString()
-            : string.Empty;
+                ? idempotencyKeyValue.ToString()
+                : string.Empty;
     }
 
     private TResult? GetBodyObject<TResult>(ApiRequest request) where TResult : class

@@ -27,20 +27,20 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
     /// </summary>
     public IdempotencyFilterAttribute(ILogger<IdempotencyFilterAttribute> logger,
         IOptions<IdempotencyControlOptions> options,
-        RequestCachingService idempotencyService,
+        IRequestCachingService cachingService,
         IOptions<MvcOptions> mvcOptions,
         JsonSerializerOptions serializerOptions)
     {
         _log = logger ?? throw new ArgumentNullException(nameof(logger));
         _options = options.Value;
-        _idempotencyService = idempotencyService ?? throw new ArgumentNullException(nameof(idempotencyService));
+        _cachingService = cachingService ?? throw new ArgumentNullException(nameof(cachingService));
         _mvcOptions = mvcOptions.Value;
         _serializerOptions = serializerOptions ?? throw new ArgumentNullException(nameof(serializerOptions));
     }
 
     private readonly ILogger<IdempotencyFilterAttribute> _log;
     private readonly IdempotencyControlOptions _options;
-    private readonly RequestCachingService _idempotencyService;
+    private readonly IRequestCachingService _cachingService;
     private readonly MvcOptions _mvcOptions;
     private readonly JsonSerializerOptions _serializerOptions;
 
@@ -84,7 +84,7 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
             string? path = context.HttpContext.Request.Path.HasValue ? context.HttpContext.Request.Path.Value : null;
             string? query = context.HttpContext.Request.QueryString.HasValue ? context.HttpContext.Request.QueryString.ToUriComponent() : null;
 
-            (bool requestCreated, ApiRequest? request) = await _idempotencyService.GetOrCreateRequestAsync(context.HttpContext, idempotencyKey, cacheKey, method, path, query);
+            (bool requestCreated, ApiRequest? request) = await _cachingService.GetOrCreateRequestAsync(context.HttpContext, idempotencyKey, cacheKey, method, path, query);
 
             if (!requestCreated)
             {
@@ -279,7 +279,7 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
 
         request.Status = IdempotencyRequestStatus.Completed;
 
-        bool requestUpdatedSuccessfully = await _idempotencyService.SetResponseInCacheAsync(cacheKey, request, executedContext.HttpContext.RequestAborted);
+        bool requestUpdatedSuccessfully = await _cachingService.SetResponseInCacheAsync(cacheKey, request, executedContext.HttpContext.RequestAborted);
 
         if (!requestUpdatedSuccessfully)
         {
@@ -388,7 +388,7 @@ public class IdempotencyFilterAttribute : Attribute, IAsyncResourceFilter
 
     private (object? bodyObject, Type bodyType) GetBodyObject(ApiRequest request)
     {
-        if (request.Body is null)
+        if (request.Body is null || request.BodyTypeKey is null)
         {
             return (null, typeof(object));
         }

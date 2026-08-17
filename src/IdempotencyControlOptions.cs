@@ -94,4 +94,12 @@ public class IdempotencyControlOptions
     /// </para>
     /// </summary>
     public IdempotencyBodyTypeRegistry BodyTypeRegistry { get; } = new IdempotencyBodyTypeRegistry();
+
+    /// <summary>
+    /// <para>
+    /// Максимальный размер тела ответа. Если размер превышен, то тело ответа не будет закешировано.
+    /// </para>
+    /// <para>Default: 0</para>
+    /// </summary>
+    public int MaxBodySizeBytes { get; set; } = 0;
 }

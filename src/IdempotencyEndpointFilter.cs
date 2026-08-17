@@ -24,18 +24,18 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
     /// </summary>
     public IdempotencyEndpointFilter(ILogger<IdempotencyEndpointFilter<T>> logger,
         IOptions<IdempotencyControlOptions> options,
-        RequestCachingService idempotencyService,
+        IRequestCachingService cachingService,
         JsonSerializerOptions serializerOptions)
     {
         _log = logger ?? throw new ArgumentNullException(nameof(logger));
         _options = options.Value;
-        _idempotencyService = idempotencyService ?? throw new ArgumentNullException(nameof(idempotencyService));
+        _cachingService = cachingService ?? throw new ArgumentNullException(nameof(cachingService));
         _serializerOptions = serializerOptions ?? throw new ArgumentNullException(nameof(serializerOptions));
     }
 
     private readonly ILogger<IdempotencyEndpointFilter<T>> _log;
     private readonly IdempotencyControlOptions _options;
-    private readonly RequestCachingService _idempotencyService;
+    private readonly IRequestCachingService _cachingService;
     private readonly JsonSerializerOptions _serializerOptions;
 
     /// <summary>
@@ -68,7 +68,7 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
         string? path = context.HttpContext.Request.Path.HasValue ? context.HttpContext.Request.Path.Value : null;
         string? query = context.HttpContext.Request.QueryString.HasValue ? context.HttpContext.Request.QueryString.ToUriComponent() : null;
 
-        ApiRequest? cachedRequest = await _idempotencyService.GetRequestFromCacheAsync(cacheKey, context.HttpContext.RequestAborted);
+        ApiRequest? cachedRequest = await _cachingService.GetRequestFromCacheAsync(cacheKey, context.HttpContext.RequestAborted);
 
         if (cachedRequest is null)
         {
@@ -77,7 +77,7 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
             newRequest.Path = path;
             newRequest.Query = query;
 
-            bool requestCached = await _idempotencyService.CacheRequestAsync(cacheKey, newRequest, context.HttpContext.RequestAborted);
+            bool requestCached = await _cachingService.CacheRequestAsync(cacheKey, newRequest, context.HttpContext.RequestAborted);
 
             if (requestCached is false && !_options.Optional)
             {
@@ -167,7 +167,10 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
                 return TypedResults.UnprocessableEntity();
 
             case CachedResultKind.Problem:
-                return TypedResults.Problem();
+            {
+                ProblemDetails? pd = GetBodyObject<ProblemDetails>(request);
+                return TypedResults.Problem(pd?.Detail, pd?.Instance, pd?.Status, pd?.Title, pd?.Type);
+            }
 
             case CachedResultKind.BadRequest:
             {
@@ -252,8 +255,9 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
                 request.ResultKind = CachedResultKind.UnprocessableEntity;
                 break;
 
-            case ProblemHttpResult:
+            case ProblemHttpResult problem:
                 request.ResultKind = CachedResultKind.Problem;
+                SetBody(request, CachedBodyKind.TValue, problem.ProblemDetails);
                 break;
 
             case ForbidHttpResult:
@@ -308,7 +312,7 @@ public class IdempotencyEndpointFilter<T> : IEndpointFilter where T : class
 
         request.Status = IdempotencyRequestStatus.Completed;
 
-        bool requestUpdatedSuccessfully = await _idempotencyService.SetResponseInCacheAsync(cacheKey, request, ctx.HttpContext.RequestAborted);
+        bool requestUpdatedSuccessfully = await _cachingService.SetResponseInCacheAsync(cacheKey, request, ctx.HttpContext.RequestAborted);
 
         if (!requestUpdatedSuccessfully)
         {

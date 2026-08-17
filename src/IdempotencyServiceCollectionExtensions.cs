@@ -49,7 +49,7 @@ public static class IdempotencyServiceCollectionExtensions
         }
 
         services.AddScoped<IdempotencyFilterAttribute>();
-        services.AddScoped<RequestCachingService>();
+        services.AddSingleton<IRequestCachingService, RequestCachingService>();
 
         return services;
     }

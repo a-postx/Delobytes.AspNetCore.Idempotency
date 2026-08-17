@@ -12,7 +12,7 @@ namespace Delobytes.AspNetCore.Idempotency;
 /// <summary>
 /// Сервис кеширования запросов.
 /// </summary>
-public class RequestCachingService
+public class RequestCachingService : IRequestCachingService
 {
     /// <summary>
     /// Конструктор.
@@ -43,42 +43,13 @@ public class RequestCachingService
         string? path,
         string? query)
     {
-        byte[]? cachedApiRequest;
+        (bool success, byte[]? cachedRequest) = await ReadCacheAsync(cacheKey, ctx.RequestAborted);
 
-        DateTime startGetDt = DateTime.UtcNow;
-
-        try
-        {
-            if (_options.CacheRequestTimeoutMs > 0)
-            {
-                using (CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted))
-                {
-                    cts.CancelAfter(_options.CacheRequestTimeoutMs);
-
-                    cachedApiRequest = await _distributedCache.GetAsync(cacheKey, cts.Token);
-                }
-            }
-            else
-            {
-                cachedApiRequest = await _distributedCache.GetAsync(cacheKey, ctx.RequestAborted);
-            }
-        }
-        catch (Exception ex)
-        {
-            _log.LogError(ex, "Error getting cached value for key {CacheKey}", cacheKey);
-            return (false, null);
-        }
-        finally
-        {
-            TimeSpan processingTime = DateTime.UtcNow - startGetDt;
-            _log.LogInformation("cache.request.idempotency.get.msec {CacheRequestIdempotencyGetMsec}", (int)processingTime.TotalMilliseconds);
-        }
-
-        if (cachedApiRequest is not null && cachedApiRequest.Length > 0)
+        if (success && cachedRequest is not null && cachedRequest.Length > 0)
         {
             try
             {
-                ApiRequest? requestFromCache = JsonSerializer.Deserialize<ApiRequest>(cachedApiRequest, _serializerOptions);
+                ApiRequest? requestFromCache = JsonSerializer.Deserialize<ApiRequest>(cachedRequest, _serializerOptions);
                 return (false, requestFromCache);
             }
             catch (JsonException ex)
@@ -113,8 +84,28 @@ public class RequestCachingService
     /// </summary>
     public async Task<ApiRequest?> GetRequestFromCacheAsync(string cacheKey, CancellationToken cancellationToken)
     {
-        byte[]? cachedRequest;
+        (bool success, byte[]? request) = await ReadCacheAsync(cacheKey, cancellationToken);
 
+        if (success == false || request is null || request.Length == 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            ApiRequest? requestFromCache = JsonSerializer.Deserialize<ApiRequest>(request, _serializerOptions);
+            return requestFromCache;
+        }
+        catch (JsonException ex)
+        {
+            _log.LogError(ex, "Error deserializing cached request value for key {CacheKey}", cacheKey);
+            return null;
+        }
+    }
+
+    private async Task<(bool success, byte[]? request)> ReadCacheAsync(string cacheKey, CancellationToken cancellationToken)
+    {
+        byte[]? cachedApiRequest;
         DateTime startGetDt = DateTime.UtcNow;
 
         try
@@ -125,18 +116,18 @@ public class RequestCachingService
                 {
                     cts.CancelAfter(_options.CacheRequestTimeoutMs);
 
-                    cachedRequest = await _distributedCache.GetAsync(cacheKey, cts.Token);
+                    cachedApiRequest = await _distributedCache.GetAsync(cacheKey, cts.Token);
                 }
             }
             else
             {
-                cachedRequest = await _distributedCache.GetAsync(cacheKey, cancellationToken);
+                cachedApiRequest = await _distributedCache.GetAsync(cacheKey, cancellationToken);
             }
         }
         catch (Exception ex)
         {
             _log.LogError(ex, "Error getting cached value for key {CacheKey}", cacheKey);
-            return null;
+            return (false, null);
         }
         finally
         {
@@ -144,21 +135,7 @@ public class RequestCachingService
             _log.LogInformation("cache.request.idempotency.get.msec {CacheRequestIdempotencyGetMsec}", (int)processingTime.TotalMilliseconds);
         }
 
-        if (cachedRequest is null || cachedRequest.Length == 0)
-        {
-            return null;
-        }
-
-        try
-        {
-            ApiRequest? requestFromCache = JsonSerializer.Deserialize<ApiRequest>(cachedRequest, _serializerOptions);
-            return requestFromCache;
-        }
-        catch (JsonException ex)
-        {
-            _log.LogError(ex, "Error deserializing cached request value for key {CacheKey}", cacheKey);
-            return null;
-        }
+        return (true, cachedApiRequest);
     }
 
     /// <summary>
@@ -166,30 +143,13 @@ public class RequestCachingService
     /// </summary>
     public async Task<bool> CacheRequestAsync(string cacheKey, ApiRequest apiRequest, CancellationToken cancellationToken)
     {
-        byte[] serializedRequest = JsonSerializer.SerializeToUtf8Bytes(apiRequest, _serializerOptions);
+        byte[] serializedRequest = SerializeRequest(apiRequest);
 
         DateTime startSetDt = DateTime.UtcNow;
 
         try
         {
-            DistributedCacheEntryOptions cacheOpts = new DistributedCacheEntryOptions
-            {
-                AbsoluteExpiration = DateTimeOffset.UtcNow.AddHours(_options.CacheAbsoluteExpirationHrs)
-            };
-
-            if (_options.CacheRequestTimeoutMs > 0)
-            {
-                using (CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
-                {
-                    cts.CancelAfter(_options.CacheRequestTimeoutMs);
-
-                    await _distributedCache.SetAsync(cacheKey, serializedRequest, cacheOpts, cts.Token);
-                }
-            }
-            else
-            {
-                await _distributedCache.SetAsync(cacheKey, serializedRequest, cacheOpts, cancellationToken);
-            }
+            await SetCacheAsync(cacheKey, serializedRequest, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -208,36 +168,19 @@ public class RequestCachingService
     /// <summary>
     /// Добавить ответ в запрос из кеша.
     /// </summary>
-    public async Task<bool> SetResponseInCacheAsync(string key, ApiRequest apiRequest, CancellationToken cancellationToken)
+    public async Task<bool> SetResponseInCacheAsync(string cacheKey, ApiRequest apiRequest, CancellationToken cancellationToken)
     {
-        byte[] serializedRequest = JsonSerializer.SerializeToUtf8Bytes(apiRequest, _serializerOptions);
+        byte[] serializedRequest = SerializeRequest(apiRequest);
 
         DateTime startSetDt = DateTime.UtcNow;
 
         try
         {
-            DistributedCacheEntryOptions cacheOpts = new DistributedCacheEntryOptions
-            {
-                AbsoluteExpiration = DateTimeOffset.UtcNow.AddHours(_options.CacheAbsoluteExpirationHrs)
-            };
-
-            if (_options.CacheRequestTimeoutMs > 0)
-            {
-                using (CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
-                {
-                    cts.CancelAfter(_options.CacheRequestTimeoutMs);
-
-                    await _distributedCache.SetAsync(key, serializedRequest, cacheOpts, cts.Token);
-                }
-            }
-            else
-            {
-                await _distributedCache.SetAsync(key, serializedRequest, cacheOpts, cancellationToken);
-            }
+            await SetCacheAsync(cacheKey, serializedRequest, cancellationToken);
         }
         catch (Exception ex)
         {
-            _log.LogError(ex, "Error updating cached value for key {CacheKey}", key);
+            _log.LogError(ex, "Error updating cached value for key {CacheKey}", cacheKey);
             return false;
         }
         finally
@@ -247,5 +190,42 @@ public class RequestCachingService
         }
 
         return true;
+    }
+
+    private byte[] SerializeRequest(ApiRequest apiRequest)
+    {
+        if (apiRequest.Body is not null && _options.MaxBodySizeBytes > 0)
+        {
+            if (apiRequest.Body.Length > _options.MaxBodySizeBytes)
+            {
+                apiRequest.Body = null;
+            }
+        }
+
+        byte[] serializedRequest = JsonSerializer.SerializeToUtf8Bytes(apiRequest, _serializerOptions);
+
+        return serializedRequest;
+    }
+
+    private async Task SetCacheAsync(string cacheKey, byte[] serializedRequest, CancellationToken cancellationToken)
+    {
+        DistributedCacheEntryOptions cacheOpts = new DistributedCacheEntryOptions
+        {
+            AbsoluteExpiration = DateTimeOffset.UtcNow.AddHours(_options.CacheAbsoluteExpirationHrs)
+        };
+
+        if (_options.CacheRequestTimeoutMs > 0)
+        {
+            using (CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+            {
+                cts.CancelAfter(_options.CacheRequestTimeoutMs);
+
+                await _distributedCache.SetAsync(cacheKey, serializedRequest, cacheOpts, cts.Token);
+            }
+        }
+        else
+        {
+            await _distributedCache.SetAsync(cacheKey, serializedRequest, cacheOpts, cancellationToken);
+        }
     }
 }
